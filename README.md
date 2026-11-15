@@ -1,62 +1,47 @@
 # Votivo Frontend
 
-Angular interface for creating polls, choosing answers, and viewing poll results.
+Angular frontend foundation for the Votivo polling and voting application.
 
-## Requirements and launch
+## Run
 
-Use Node.js 24.15 or newer within the 24.x release line, and npm. This project uses Angular 22 standalone components and lazy routes.
+Use Node.js 24.15 or newer within the 24.x release line, and npm.
 
 ```bash
 npm ci
 npm start
 ```
 
-Open `http://localhost:4200`.
+Open `http://localhost:4200`. No backend, database, or Docker is needed.
 
-To view demonstration results, start Result Service separately on port 8083 with its demo profile:
+On Windows, use `npm.cmd` if PowerShell blocks `npm.ps1`.
 
-```powershell
-# Run inside Votivo/backend/services/result-service:
-.\gradlew.bat bootRun --args='--spring.profiles.active=demo'
-```
+## Laboratory 4 scope
 
-The Angular development server proxies `/api/**` to `http://localhost:8083` using `proxy.conf.json`. Change that file if you run Result Service on another port. No CORS changes are required for this local setup.
+This is a runnable project skeleton, not a completed application. It includes the application shell, routing, a basic poll-list component, the Poll model, and PollService.
 
-## Routes and current behavior
-
-| Route                    | Current behavior                                                                            |
-| ------------------------ | ------------------------------------------------------------------------------------------- |
-| `/polls`                 | Lists one explicitly labeled sample poll.                                                   |
-| `/polls/new`             | Validates a minimal draft and previews it locally without saving.                           |
-| `/polls/:pollId/vote`    | Previews selections for the sample poll without sending a vote.                             |
-| `/polls/:pollId/results` | Reads real aggregate JSON from Result Service, with loading, error/retry, and empty states. |
-| `/login`, `/register`    | Account-page placeholders; no authentication is performed.                                  |
-| Other paths              | Not-found page.                                                                             |
+PollService currently returns an empty list, and the page displays an empty state. API integration and the creation, voting, results, and account flows are planned for later work.
 
 ## Structure
 
-- `src/app/core/models/` - poll and result contracts.
-- `src/app/core/data/` - explicit sample-poll metadata.
-- `src/app/core/services/` - HTTP access to Result Service.
-- `src/app/features/` - polls, voting, results, account, and not-found pages.
-- `src/app/app.routes.ts` - application routes.
-- `docs/` - development and integration notes.
+- `src/app/app.*` - root component, configuration, and routes.
+- `src/app/core/models/` - shared models.
+- `src/app/core/services/` - service layer.
+- `src/app/features/polls/` - poll-list component.
+- `tests/` - reserved test area.
+- `docs/` - development notes.
 
-## Checks
+## Build
 
 ```bash
-npm test -- --watch=false
 npm run build
 ```
 
-## Responsibility and scope
+## Team responsibility
 
-Ruslan Kolisnychenko owns the Angular frontend and Result Service. This is the laboratory 4 foundation. Poll persistence, vote submission, Keycloak integration, access guards, administration, and production deployment are future work.
-
-The sample poll metadata matches the optional Result Service demo fixture. No responses or passwords are stored in this frontend. Drafts and selections disappear when the page is destroyed or reloaded.
+Ruslan Kolisnychenko owns the Angular frontend and Result Service. The rest of the team owns User Service, Poll Service, and Vote Service.
 
 [Result Service](https://github.com/koliruslik/Votivo-result-service/tree/main) | [Integration repository](https://github.com/koliruslik/Votivo/tree/main)
 
-## Working as a submodule
+## Working locally
 
-Work directly inside `Votivo/frontend`, on this repository's feature branch. Commit here to change the frontend repository. The parent Votivo repository's component reference is updated separately after a component PR is merged.
+Work directly inside `Votivo/frontend` on this repository's feature branch. Commit changes here and review them through a PR. Updating the submodule reference in the parent repository is a separate step.
