@@ -1,0 +1,19 @@
+header {
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+  padding: 1rem 0;
+  border-bottom: 1px solid #ddd;
+}
+header a {
+  color: inherit;
+  font-size: 1.4rem;
+  font-weight: 700;
+  text-decoration: none;
+}
+header span {
+  color: #555;
+}
+main {
+  padding: 2rem 0;
+}
