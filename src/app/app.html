@@ -1,0 +1,16 @@
+<header class="site-header">
+  <a class="brand" routerLink="/polls" aria-label="Votivo home"
+    ><span class="brand-mark">V</span> Votivo</a
+  >
+  <nav aria-label="Main navigation">
+    <a routerLink="/polls" routerLinkActive="active" [routerLinkActiveOptions]="{ exact: true }"
+      >Explore polls</a
+    >
+    <a routerLink="/polls/new" routerLinkActive="active">Create a poll</a>
+    <a routerLink="/login" routerLinkActive="active">Sign in</a>
+  </nav>
+</header>
+<main id="main-content">
+  <router-outlet />
+</main>
+<footer>Votivo <span>Every voice adds to the picture.</span></footer>
