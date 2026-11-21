@@ -21,7 +21,7 @@ The header offers Sign in and Register. Authentication happens on Keycloak's hos
 
 Non-secret runtime settings live in [public/auth-config.json](public/auth-config.json). The defaults target the integration repository's `votivo` realm and `votivo-frontend` public client at `http://localhost:18080`.
 
-Registration is visible but disabled by default: the current realm export has self-registration turned off. The Keycloak administrator must enable it, and then set `registrationEnabled: true` in the runtime configuration.
+The Register button is enabled in the runtime configuration. The Keycloak administrator must also enable self-registration in the realm. The integration repository's initial realm export still has registration disabled; changing the live realm does not update that export automatically. Set `registrationEnabled: false` to disable the button in an environment without registration.
 
 See [Keycloak setup and handoff](docs/keycloak.md) for the exact server settings, DPoP configuration, and acceptance checks. There is no client secret or password form in this frontend.
 

@@ -6,14 +6,14 @@ This shell delegates account pages to Keycloak. The frontend does not handle use
 
 Edit public/auth-config.json before running locally. In a deployed build, edit or mount the served auth-config.json file; a bundle rebuild is not required.
 
-| Setting             | Default                | Meaning                                                                     |
-| ------------------- | ---------------------- | --------------------------------------------------------------------------- |
-| enabled             | true                   | Set false to leave only the public shell without contacting Keycloak.       |
-| url                 | http://localhost:18080 | Keycloak base URL reachable from the browser.                               |
-| realm               | votivo                 | Realm name.                                                                 |
-| clientId            | votivo-frontend        | Public OIDC client.                                                         |
-| registrationEnabled | false                  | Enable the header's Register button only after enabling realm registration. |
-| dpopMode            | strict                 | Require DPoP support advertised by Keycloak. Other values: auto or off.     |
+| Setting             | Default                | Meaning                                                                   |
+| ------------------- | ---------------------- | ------------------------------------------------------------------------- |
+| enabled             | true                   | Set false to leave only the public shell without contacting Keycloak.     |
+| url                 | http://localhost:18080 | Keycloak base URL reachable from the browser.                             |
+| realm               | votivo                 | Realm name.                                                               |
+| clientId            | votivo-frontend        | Public OIDC client.                                                       |
+| registrationEnabled | true                   | Enables the header's Register button; realm registration must also be on. |
+| dpopMode            | strict                 | Require DPoP support advertised by Keycloak. Other values: auto or off.   |
 
 Keep all fields present, including when enabled is false. This file is public: never add client secrets, passwords, SMTP keys, or administrative credentials.
 
@@ -27,7 +27,7 @@ The current integration repository export matches the default realm/client setti
 4. Set Valid Redirect URIs to http://localhost:4200/* and Web Origins to http://localhost:4200.
 5. Set Valid Post Logout Redirect URIs to http://localhost:4200/*.
 6. Keep DPoP-bound access tokens enabled when the frontend uses dpopMode strict. The browser must have Web Crypto support; use localhost for development and HTTPS for deployment.
-7. Create a test user with a non-temporary password, or enable Realm settings > Login > User registration. To expose the registration button, also set registrationEnabled true in auth-config.json.
+7. Enable Realm settings > Login > User registration for the Register button to work. The runtime configuration already sets registrationEnabled true. For environments that only use pre-created users, set registrationEnabled false and create a test user with a non-temporary password.
 8. If email verification or password-reset delivery is required, configure working SMTP separately.
 
 Use the browser's actual origin. A hostname or port change requires matching updates to redirect URIs, logout URIs, and Web Origins. Docker-internal hostnames such as keycloak are not normally reachable by a browser on the host.
