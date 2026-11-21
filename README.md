@@ -51,6 +51,10 @@ npm run build
 
 Automated tests use a mocked Keycloak adapter and exercise the shell's state transitions and controls. Complete login/registration acceptance requires a configured Keycloak and a test user.
 
+## Continuous integration
+
+GitHub Actions runs dependency installation with `npm ci`, the automated tests, and a production build on pull requests targeting `main` and pushes to `main`. The workflow can also be started manually. It uses Node.js 24.16.0 and an npm download cache; no running Keycloak server or secrets are required.
+
 ## Team responsibility
 
 Ruslan Kolisnychenko owns the Angular frontend and Result Service. The rest of the team owns User Service, Poll Service, and Vote Service.
