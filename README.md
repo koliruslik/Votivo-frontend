@@ -1,6 +1,6 @@
 # Votivo Frontend
 
-Angular frontend foundation for the Votivo polling and voting application.
+Angular frontend foundation for Votivo, with a small Keycloak account shell.
 
 ## Run
 
@@ -11,30 +11,45 @@ npm ci
 npm start
 ```
 
-Open `http://localhost:4200`. No backend, database, or Docker is needed.
+Open `http://localhost:4200`. On Windows, use `npm.cmd` if PowerShell blocks `npm.ps1`.
 
-On Windows, use `npm.cmd` if PowerShell blocks `npm.ps1`.
+The public poll page remains available when Keycloak is offline. Sign-in requires the configured Keycloak server.
 
-## Laboratory 4 scope
+## Account shell
 
-This is a runnable project skeleton, not a completed application. It includes the application shell, routing, a basic poll-list component, the Poll model, and PollService.
+The header offers Sign in and Register. Authentication happens on Keycloak's hosted pages. After sign-in, the header shows the account name and Sign out.
 
-PollService currently returns an empty list, and the page displays an empty state. API integration and the creation, voting, results, and account flows are planned for later work.
+Non-secret runtime settings live in [public/auth-config.json](public/auth-config.json). The defaults target the integration repository's `votivo` realm and `votivo-frontend` public client at `http://localhost:18080`.
+
+Registration is visible but disabled by default: the current realm export has self-registration turned off. The Keycloak administrator must enable it, and then set `registrationEnabled: true` in the runtime configuration.
+
+See [Keycloak setup and handoff](docs/keycloak.md) for the exact server settings, DPoP configuration, and acceptance checks. There is no client secret or password form in this frontend.
+
+## Current scope
+
+The application has a public `/polls` page, Poll model, and PollService. PollService returns an empty list. The account shell adds sign-in, registration navigation, logout, and session state.
+
+Poll creation, vote submission, result visualization, backend API calls, and gateway authorization remain separate work. Account state in the header does not enforce API permissions.
 
 ## Structure
 
-- `src/app/app.*` - root component, configuration, and routes.
+- `src/app/app.*` - application shell, account header, initialization, and routes.
+- `src/app/core/auth/` - authentication state, runtime config validation, and Keycloak adapter.
 - `src/app/core/models/` - shared models.
-- `src/app/core/services/` - service layer.
-- `src/app/features/polls/` - poll-list component.
-- `tests/` - reserved test area.
-- `docs/` - development notes.
+- `src/app/core/services/` - poll service.
+- `src/app/features/polls/` - public poll-list component.
+- `public/` - runtime auth settings and silent SSO callback.
+- `tests/` - test instructions.
+- `docs/` - development and Keycloak configuration notes.
 
-## Build
+## Checks
 
 ```bash
+npm test -- --watch=false
 npm run build
 ```
+
+Automated tests use a mocked Keycloak adapter and exercise the shell's state transitions and controls. Complete login/registration acceptance requires a configured Keycloak and a test user.
 
 ## Team responsibility
 
@@ -44,4 +59,4 @@ Ruslan Kolisnychenko owns the Angular frontend and Result Service. The rest of t
 
 ## Working locally
 
-Work directly inside `Votivo/frontend` on this repository's feature branch. Commit changes here and review them through a PR. Updating the submodule reference in the parent repository is a separate step.
+Work directly inside `Votivo/frontend` on this repository's feature branch. Commit changes here and review them through a PR. Updating the parent repository's component reference is a separate step.

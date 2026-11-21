@@ -1,0 +1,208 @@
+import { provideHttpClient } from '@angular/common/http';
+import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
+import { TestBed } from '@angular/core/testing';
+import { provideRouter, Router } from '@angular/router';
+import Keycloak from 'keycloak-js';
+import { App } from '../../app';
+import { routes } from '../../app.routes';
+import { AuthService } from './auth.service';
+import { parseAuthConfig } from './auth-config';
+import { KEYCLOAK_FACTORY } from './keycloak-client';
+
+const config = {
+  enabled: true,
+  url: 'http://localhost:18080',
+  realm: 'votivo',
+  clientId: 'votivo-frontend',
+  registrationEnabled: false,
+  dpopMode: 'strict',
+};
+
+function makeClient() {
+  return {
+    authenticated: false,
+    idTokenParsed: undefined as Record<string, string> | undefined,
+    init: vi.fn().mockResolvedValue(false),
+    login: vi.fn().mockResolvedValue(undefined),
+    register: vi.fn().mockResolvedValue(undefined),
+    logout: vi.fn().mockResolvedValue(undefined),
+    clearToken: vi.fn().mockResolvedValue(undefined),
+    updateToken: vi.fn().mockResolvedValue(true),
+    onAuthSuccess: undefined as (() => void) | undefined,
+    onAuthRefreshSuccess: undefined as (() => void) | undefined,
+    onAuthLogout: undefined as (() => void) | undefined,
+    onTokenExpired: undefined as (() => void) | undefined,
+  };
+}
+
+describe('Keycloak account shell', () => {
+  let auth: AuthService;
+  let http: HttpTestingController;
+  let client: ReturnType<typeof makeClient>;
+  let factory: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    client = makeClient();
+    factory = vi.fn(() => client as unknown as Keycloak);
+    TestBed.configureTestingModule({
+      imports: [App],
+      providers: [
+        provideHttpClient(),
+        provideHttpClientTesting(),
+        provideRouter(routes),
+        { provide: KEYCLOAK_FACTORY, useValue: factory },
+      ],
+    });
+    auth = TestBed.inject(AuthService);
+    http = TestBed.inject(HttpTestingController);
+  });
+
+  afterEach(() => http.verify());
+
+  async function initialize(overrides: Record<string, unknown> = {}) {
+    const first = auth.initialize();
+    expect(auth.initialize()).toBe(first);
+    http.expectOne('/auth-config.json').flush({ ...config, ...overrides });
+    await first;
+  }
+
+  it('loads runtime settings and starts public SSO with PKCE and strict DPoP', async () => {
+    await initialize();
+    expect(factory).toHaveBeenCalledWith({
+      url: config.url,
+      realm: config.realm,
+      clientId: config.clientId,
+    });
+    expect(client.init).toHaveBeenCalledWith(
+      expect.objectContaining({
+        onLoad: 'check-sso',
+        flow: 'standard',
+        pkceMethod: 'S256',
+        dpopConfig: { mode: 'strict' },
+        silentCheckSsoFallback: false,
+      }),
+    );
+    expect(auth.status()).toBe('anonymous');
+    expect(client.login).not.toHaveBeenCalled();
+  });
+
+  it('keeps polls visible and offers retry when Keycloak is unavailable', async () => {
+    client.init.mockRejectedValue(new Error('Unavailable'));
+    await initialize();
+    expect(auth.status()).toBe('unavailable');
+    const fixture = TestBed.createComponent(App);
+    await TestBed.inject(Router).navigateByUrl('/polls');
+    await fixture.whenStable();
+    fixture.detectChanges();
+    const page: HTMLElement = fixture.nativeElement;
+    expect(page.textContent).toContain('No polls available.');
+    expect(page.textContent).toContain('Sign-in is unavailable');
+    expect(page.textContent).toContain('Retry connection');
+    expect(page.querySelector<HTMLButtonElement>('nav button')?.disabled).toBe(true);
+  });
+
+  it('handles missing runtime configuration without preventing bootstrap', async () => {
+    const initialized = auth.initialize();
+    http.expectOne('/auth-config.json').flush('Missing', { status: 404, statusText: 'Not Found' });
+    await initialized;
+    expect(auth.status()).toBe('unavailable');
+    expect(factory).not.toHaveBeenCalled();
+  });
+
+  it('supports explicitly disabled authentication without contacting Keycloak', async () => {
+    await initialize({ enabled: false });
+    expect(auth.status()).toBe('disabled');
+    expect(factory).not.toHaveBeenCalled();
+  });
+
+  it('shows sign in and disabled registration until self-registration is configured', async () => {
+    await initialize();
+    const fixture = TestBed.createComponent(App);
+    fixture.detectChanges();
+    const buttons = fixture.nativeElement.querySelectorAll(
+      'nav button',
+    ) as NodeListOf<HTMLButtonElement>;
+    expect(buttons[0].textContent).toContain('Sign in');
+    expect(buttons[0].disabled).toBe(false);
+    expect(buttons[1].textContent).toContain('Register');
+    expect(buttons[1].disabled).toBe(true);
+    await auth.register();
+    expect(client.register).not.toHaveBeenCalled();
+    buttons[0].click();
+    await fixture.whenStable();
+    expect(client.login).toHaveBeenCalledWith({
+      redirectUri: window.location.origin + window.location.pathname,
+    });
+  });
+
+  it('delegates enabled registration to Keycloak without a local credential form', async () => {
+    await initialize({ registrationEnabled: true });
+    await auth.register();
+    expect(client.register).toHaveBeenCalledWith({
+      redirectUri: window.location.origin + window.location.pathname,
+    });
+    const fixture = TestBed.createComponent(App);
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('input[type=password]')).toBeNull();
+  });
+
+  it('shows the authenticated account and delegates logout to Keycloak', async () => {
+    client.authenticated = true;
+    client.idTokenParsed = { name: 'Test user', preferred_username: 'tester' };
+    await initialize();
+    const fixture = TestBed.createComponent(App);
+    fixture.detectChanges();
+    expect(fixture.nativeElement.textContent).toContain('Test user');
+    const button = fixture.nativeElement.querySelector('nav button') as HTMLButtonElement;
+    expect(button.textContent).toContain('Sign out');
+    button.click();
+    await fixture.whenStable();
+    expect(client.logout).toHaveBeenCalledWith({ redirectUri: window.location.origin });
+  });
+
+  it('clears the displayed session if token refresh fails', async () => {
+    client.authenticated = true;
+    client.updateToken.mockRejectedValue(new Error('Expired'));
+    await initialize();
+    client.onTokenExpired?.();
+    await vi.waitFor(() => expect(auth.status()).toBe('anonymous'));
+    expect(auth.displayName()).toBe('');
+    expect(client.clearToken).toHaveBeenCalled();
+    expect(auth.message()).toContain('session expired');
+  });
+
+  it('reports redirect errors and allows a subsequent sign-in attempt', async () => {
+    await initialize();
+    client.login.mockRejectedValueOnce(new Error('Redirect blocked'));
+    await auth.signIn();
+    expect(auth.busy()).toBe(false);
+    expect(auth.message()).toContain('could not be completed');
+    await auth.signIn();
+    expect(client.login).toHaveBeenCalledTimes(2);
+    expect(auth.message()).toBeNull();
+  });
+
+  it('blocks duplicate account actions while a redirect is pending', async () => {
+    await initialize();
+    let complete!: () => void;
+    client.login.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          complete = resolve;
+        }),
+    );
+    const pending = auth.signIn();
+    await auth.signIn();
+    expect(client.login).toHaveBeenCalledTimes(1);
+    expect(auth.busy()).toBe(true);
+    complete();
+    await pending;
+    expect(auth.busy()).toBe(false);
+  });
+
+  it('rejects malformed configuration instead of creating an incorrect auth client', () => {
+    expect(() => parseAuthConfig({ ...config, url: 'javascript:alert(1)' })).toThrow();
+    expect(() => parseAuthConfig({ ...config, registrationEnabled: 'false' })).toThrow();
+    expect(() => parseAuthConfig({ ...config, dpopMode: 'anything' })).toThrow();
+  });
+});
