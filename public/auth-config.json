@@ -1,0 +1,8 @@
+{
+  "enabled": true,
+  "url": "http://localhost:18080",
+  "realm": "votivo",
+  "clientId": "votivo-frontend",
+  "registrationEnabled": true,
+  "dpopMode": "strict"
+}

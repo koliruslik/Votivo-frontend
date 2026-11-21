@@ -1,7 +1,40 @@
 <header>
   <a routerLink="/polls">Votivo</a>
   <span>Polls and voting</span>
+  <nav aria-label="Account" [attr.aria-busy]="auth.busy()">
+    @if (auth.authenticated()) {
+      <span class="account-name">{{ auth.displayName() }}</span>
+      <button type="button" [disabled]="auth.busy()" (click)="auth.signOut()">Sign out</button>
+    } @else {
+      <button type="button" [disabled]="!auth.canSignIn()" (click)="auth.signIn()">Sign in</button>
+      <button
+        type="button"
+        [disabled]="!auth.canRegister()"
+        [attr.aria-describedby]="auth.registrationEnabled() ? null : 'registration-note'"
+        (click)="auth.register()"
+      >
+        Register
+      </button>
+    }
+  </nav>
 </header>
+<div class="account-status" aria-live="polite">
+  @if (auth.status() === 'loading') {
+    <p>Connecting to sign-in service…</p>
+  }
+  @if (auth.status() === 'disabled') {
+    <p>Account access is not enabled in this environment.</p>
+  }
+  @if (!auth.authenticated() && !auth.registrationEnabled()) {
+    <p id="registration-note">Registration is not available yet.</p>
+  }
+  @if (auth.message(); as message) {
+    <p>{{ message }}</p>
+  }
+  @if (auth.status() === 'unavailable') {
+    <button type="button" (click)="auth.retry()">Retry connection</button>
+  }
+</div>
 <main>
   <router-outlet />
 </main>
