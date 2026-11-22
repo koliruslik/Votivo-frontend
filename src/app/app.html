@@ -1,40 +1,93 @@
-<header>
-  <a routerLink="/polls">Votivo</a>
-  <span>Polls and voting</span>
-  <nav aria-label="Account" [attr.aria-busy]="auth.busy()">
-    @if (auth.authenticated()) {
-      <span class="account-name">{{ auth.displayName() }}</span>
-      <button type="button" [disabled]="auth.busy()" (click)="auth.signOut()">Sign out</button>
-    } @else {
-      <button type="button" [disabled]="!auth.canSignIn()" (click)="auth.signIn()">Sign in</button>
-      <button
-        type="button"
-        [disabled]="!auth.canRegister()"
-        [attr.aria-describedby]="auth.registrationEnabled() ? null : 'registration-note'"
-        (click)="auth.register()"
+<a class="skip-link" href="#main-content">Skip to content</a>
+<header class="site-header">
+  <div class="header-inner">
+    <a class="brand" routerLink="/polls" aria-label="Votivo home" (click)="menuOpen.set(false)"
+      ><svg viewBox="0 0 32 32" aria-hidden="true">
+        <rect width="32" height="32" rx="9" fill="currentColor" />
+        <path
+          d="m9 15 5 6 10-12"
+          fill="none"
+          stroke="white"
+          stroke-width="3"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        /></svg
+      ><span>votivo<span class="brand-period">.</span></span></a
+    >
+    <button
+      class="menu-toggle icon-button"
+      (click)="menuOpen.set(!menuOpen())"
+      [attr.aria-expanded]="menuOpen()"
+      aria-controls="main-nav"
+      aria-label="Toggle navigation"
+    >
+      ☰
+    </button>
+    <nav
+      id="main-nav"
+      class="main-nav"
+      [class.mobile-open]="menuOpen()"
+      aria-label="Main navigation"
+    >
+      <a
+        routerLink="/polls"
+        routerLinkActive="nav-active"
+        [routerLinkActiveOptions]="{ exact: true }"
+        (click)="menuOpen.set(false)"
+        >Explore</a
       >
-        Register
-      </button>
-    }
-  </nav>
+      @if (auth.authenticated()) {
+        <a routerLink="/my-polls" routerLinkActive="nav-active" (click)="menuOpen.set(false)"
+          >My polls</a
+        >
+      }
+      @if (auth.isAdmin()) {
+        <a routerLink="/admin" routerLinkActive="nav-active" (click)="menuOpen.set(false)"
+          >Moderation</a
+        >
+      }
+      <a routerLink="/help" routerLinkActive="nav-active" (click)="menuOpen.set(false)">Help</a>
+    </nav>
+    <nav class="account-nav" aria-label="Account" [attr.aria-busy]="auth.busy()">
+      @if (auth.authenticated()) {
+        <a class="account-link" routerLink="/account"
+          ><span class="avatar" aria-hidden="true">{{
+            auth.displayName().slice(0, 1).toUpperCase()
+          }}</span
+          ><span>{{ auth.displayName() }}</span></a
+        ><button class="text-button" [disabled]="auth.busy()" (click)="auth.signOut()">
+          Sign out
+        </button>
+      } @else {
+        <button class="text-button" [disabled]="!auth.canSignIn()" (click)="auth.signIn()">
+          Sign in</button
+        ><button
+          class="button primary"
+          [disabled]="!auth.canRegister()"
+          [attr.aria-describedby]="auth.registrationEnabled() ? null : 'registration-note'"
+          (click)="auth.register()"
+        >
+          Register
+        </button>
+      }
+    </nav>
+  </div>
 </header>
-<div class="account-status" aria-live="polite">
-  @if (auth.status() === 'loading') {
-    <p>Connecting to sign-in service…</p>
-  }
-  @if (auth.status() === 'disabled') {
-    <p>Account access is not enabled in this environment.</p>
-  }
-  @if (!auth.authenticated() && !auth.registrationEnabled()) {
-    <p id="registration-note">Registration is not available yet.</p>
-  }
-  @if (auth.message(); as message) {
-    <p>{{ message }}</p>
-  }
-  @if (auth.status() === 'unavailable') {
-    <button type="button" (click)="auth.retry()">Retry connection</button>
-  }
-</div>
-<main>
-  <router-outlet />
-</main>
+@if (auth.message() || auth.status() === 'unavailable') {
+  <div class="global-notice" role="status">
+    <span>{{ auth.message() }}</span>
+    @if (auth.status() === 'unavailable') {
+      <button class="text-button" (click)="auth.retry()">Retry connection</button>
+    }
+  </div>
+}
+@if (!auth.authenticated() && !auth.registrationEnabled() && auth.status() !== 'loading') {
+  <span class="sr-only" id="registration-note"
+    >Registration is not available in this environment.</span
+  >
+}
+<main id="main-content" class="main-container" tabindex="-1"><router-outlet /></main>
+<footer class="site-footer">
+  <a class="footer-brand" routerLink="/polls">Votivo</a><span>Room for every opinion.</span
+  ><a routerLink="/help">How it works</a><span class="copyright">© {{ year }} Votivo</span>
+</footer>

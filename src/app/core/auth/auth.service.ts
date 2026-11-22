@@ -6,6 +6,11 @@ import { AuthConfig, parseAuthConfig } from './auth-config';
 import { KEYCLOAK_FACTORY } from './keycloak-client';
 
 export type AuthStatus = 'loading' | 'disabled' | 'unavailable' | 'anonymous' | 'authenticated';
+export class SessionExpiredError extends Error {
+  constructor() {
+    super('Your session expired. Please sign in again.');
+  }
+}
 
 @Injectable({ providedIn: 'root' })
 export class AuthService {
@@ -16,7 +21,10 @@ export class AuthService {
   private readonly currentMessage = signal<string | null>(null);
   private readonly actionPending = signal(false);
   private readonly registrationAllowed = signal(false);
+  private readonly subject = signal('');
+  private readonly admin = signal(false);
   private client?: Keycloak;
+  private rejectedSession = false;
   private initialization?: Promise<void>;
 
   readonly status = this.currentStatus.asReadonly();
@@ -27,6 +35,25 @@ export class AuthService {
   readonly canSignIn = computed(() => this.status() === 'anonymous' && !this.busy());
   readonly canRegister = computed(() => this.canSignIn() && this.registrationAllowed());
   readonly registrationEnabled = this.registrationAllowed.asReadonly();
+  readonly userId = this.subject.asReadonly();
+  readonly isAdmin = this.admin.asReadonly();
+
+  async request(path: string, init: RequestInit): Promise<Response> {
+    const url = new URL(path, window.location.origin);
+    if (url.origin !== window.location.origin || !url.pathname.startsWith('/api/v1/')) {
+      throw new Error('API requests must use the same origin.');
+    }
+    if (!this.client || !this.authenticated()) return fetch(url, init);
+    await this.refreshSession(this.client);
+    if (!this.authenticated() || !this.client.token) throw new SessionExpiredError();
+    const headers = new Headers(init.headers);
+    headers.set('Authorization', `Bearer ${this.client.token}`);
+    return this.client.fetch(url, { ...init, headers });
+  }
+
+  async manageAccount(): Promise<void> {
+    if (this.authenticated()) await this.perform((client) => client.accountManagement());
+  }
 
   initialize(): Promise<void> {
     this.initialization ??= this.initializeClient();
@@ -79,7 +106,7 @@ export class AuthService {
         void this.refreshSession(client);
       };
 
-      await client.init({
+      const initialization = client.init({
         onLoad: 'check-sso',
         flow: 'standard',
         pkceMethod: 'S256',
@@ -89,12 +116,20 @@ export class AuthService {
         messageReceiveTimeout: 5000,
         dpopConfig: this.dpopConfig(config),
       });
+      await this.withIdentityDeadline(initialization);
       this.updateSession(client);
     } catch {
       if (this.client) {
-        await this.client.clearToken().catch(() => undefined);
+        this.client.onAuthSuccess = undefined;
+        this.client.onAuthRefreshSuccess = undefined;
+        this.client.onAuthLogout = undefined;
+        this.client.onTokenExpired = undefined;
+        void this.client.clearToken().catch(() => undefined);
+        this.client = undefined;
       }
       this.currentUser.set('');
+      this.subject.set('');
+      this.admin.set(false);
       this.currentStatus.set('unavailable');
       this.currentMessage.set('Sign-in is unavailable. You can still browse polls.');
     }
@@ -105,12 +140,15 @@ export class AuthService {
   }
 
   private updateSession(client: Keycloak): void {
+    if (this.rejectedSession) return;
     if (!client.authenticated) {
       this.clearSession();
       return;
     }
     const claims = client.idTokenParsed ?? client.tokenParsed;
     this.currentUser.set(claims?.['name'] ?? claims?.['preferred_username'] ?? 'Account');
+    this.subject.set(client.tokenParsed?.sub ?? '');
+    this.admin.set(client.hasRealmRole?.('ADMIN') ?? false);
     this.currentMessage.set(null);
     this.currentStatus.set('authenticated');
   }
@@ -118,16 +156,36 @@ export class AuthService {
   private clearSession(): void {
     this.currentUser.set('');
     this.currentStatus.set('anonymous');
+    this.subject.set('');
+    this.admin.set(false);
   }
 
   private async refreshSession(client: Keycloak): Promise<void> {
     try {
-      await client.updateToken(30);
+      await this.withIdentityDeadline(client.updateToken(30));
       this.updateSession(client);
     } catch {
-      await client.clearToken().catch(() => undefined);
+      this.rejectedSession = true;
+      client.onAuthSuccess = undefined;
+      client.onAuthRefreshSuccess = undefined;
+      client.onTokenExpired = undefined;
+      void client.clearToken().catch(() => undefined);
       this.clearSession();
       this.currentMessage.set('Your session expired. Please sign in again.');
+    }
+  }
+
+  private async withIdentityDeadline<T>(operation: Promise<T>): Promise<T> {
+    let deadline: ReturnType<typeof setTimeout>;
+    try {
+      return await Promise.race([
+        operation,
+        new Promise<never>((_, reject) => {
+          deadline = setTimeout(() => reject(new Error('Sign-in connection timed out')), 8000);
+        }),
+      ]);
+    } finally {
+      clearTimeout(deadline!);
     }
   }
 
@@ -145,6 +203,15 @@ export class AuthService {
   }
 
   private returnUri(): string {
-    return window.location.origin + window.location.pathname;
+    const params = new URLSearchParams(window.location.search);
+    const target = params.get('returnTo');
+    const fallback = new URL(
+      window.location.pathname + window.location.search,
+      window.location.origin,
+    );
+    if (!target || !target.startsWith('/') || /[\\\u0000-\u0020]/.test(target))
+      return fallback.href;
+    const destination = new URL(target, window.location.origin);
+    return destination.origin === window.location.origin ? destination.href : fallback.href;
   }
 }

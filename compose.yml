@@ -1,0 +1,32 @@
+name: votivo-frontend
+services:
+  web:
+    build: .
+    restart: unless-stopped
+    ports:
+      - '127.0.0.1:4200:4200'
+    environment:
+      PORT: 4200
+      PUBLIC_ORIGIN: ${PUBLIC_ORIGIN:-http://localhost:4200}
+      POLL_URL: http://poll-service:8082
+      VOTE_URL: http://vote-service:8080
+      RESULT_URL: http://result-service:8083
+      KEYCLOAK_ISSUER: ${KEYCLOAK_ISSUER:-http://localhost:18080/realms/votivo}
+      KEYCLOAK_JWKS_URL: http://keycloak:8080/realms/votivo/protocol/openid-connect/certs
+      KEYCLOAK_AUDIENCE: poll-service
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://127.0.0.1:4200/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+    networks: [backend]
+networks:
+  backend:
+    external: true
+    name: ${BACKEND_NETWORK:-votivo_internal}

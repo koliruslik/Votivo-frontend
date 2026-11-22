@@ -5,9 +5,10 @@ import { provideRouter, Router } from '@angular/router';
 import Keycloak from 'keycloak-js';
 import { App } from '../../app';
 import { routes } from '../../app.routes';
-import { AuthService } from './auth.service';
+import { AuthService, SessionExpiredError } from './auth.service';
 import { parseAuthConfig } from './auth-config';
 import { KEYCLOAK_FACTORY } from './keycloak-client';
+import { PollService } from '../services/poll.service';
 
 const config = {
   enabled: true,
@@ -28,6 +29,8 @@ function makeClient() {
     logout: vi.fn().mockResolvedValue(undefined),
     clearToken: vi.fn().mockResolvedValue(undefined),
     updateToken: vi.fn().mockResolvedValue(true),
+    token: 'test-access-token',
+    fetch: vi.fn().mockImplementation(() => Promise.resolve(new Response('{}'))),
     onAuthSuccess: undefined as (() => void) | undefined,
     onAuthRefreshSuccess: undefined as (() => void) | undefined,
     onAuthLogout: undefined as (() => void) | undefined,
@@ -51,6 +54,12 @@ describe('Keycloak account shell', () => {
         provideHttpClientTesting(),
         provideRouter(routes),
         { provide: KEYCLOAK_FACTORY, useValue: factory },
+        {
+          provide: PollService,
+          useValue: {
+            list: vi.fn().mockResolvedValue({ content: [], totalElements: 0, totalPages: 0 }),
+          },
+        },
       ],
     });
     auth = TestBed.inject(AuthService);
@@ -95,7 +104,7 @@ describe('Keycloak account shell', () => {
     await fixture.whenStable();
     fixture.detectChanges();
     const page: HTMLElement = fixture.nativeElement;
-    expect(page.textContent).toContain('No polls available.');
+    expect(page.textContent).toContain('No polls here yet');
     expect(page.textContent).toContain('Sign-in is unavailable');
     expect(page.textContent).toContain('Retry connection');
     expect(page.querySelector<HTMLButtonElement>('nav button')?.disabled).toBe(true);
@@ -107,6 +116,23 @@ describe('Keycloak account shell', () => {
     await initialized;
     expect(auth.status()).toBe('unavailable');
     expect(factory).not.toHaveBeenCalled();
+  });
+  it('finishes bootstrap when the identity provider hangs and ignores late session callbacks', async () => {
+    vi.useFakeTimers();
+    try {
+      client.init.mockImplementation(() => new Promise(() => {}));
+      const initialized = auth.initialize();
+      http.expectOne('/auth-config.json').flush(config);
+      await vi.advanceTimersByTimeAsync(8001);
+      await initialized;
+      expect(auth.status()).toBe('unavailable');
+      client.authenticated = true;
+      client.onAuthSuccess?.();
+      expect(auth.status()).toBe('unavailable');
+      expect(auth.userId()).toBe('');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('supports explicitly disabled authentication without contacting Keycloak', async () => {
@@ -170,6 +196,21 @@ describe('Keycloak account shell', () => {
     expect(client.clearToken).toHaveBeenCalled();
     expect(auth.message()).toContain('session expired');
   });
+  it('does not keep an API call pending indefinitely while token refresh hangs', async () => {
+    client.authenticated = true;
+    await initialize();
+    vi.useFakeTimers();
+    try {
+      client.updateToken.mockImplementation(() => new Promise(() => {}));
+      const outcome = auth.request('/api/v1/polls/mine', {}).catch((error) => error);
+      await vi.advanceTimersByTimeAsync(8001);
+      expect(await outcome).toBeInstanceOf(SessionExpiredError);
+      expect(auth.authenticated()).toBe(false);
+      expect(client.fetch).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 
   it('reports redirect errors and allows a subsequent sign-in attempt', async () => {
     await initialize();
@@ -198,6 +239,37 @@ describe('Keycloak account shell', () => {
     complete();
     await pending;
     expect(auth.busy()).toBe(false);
+  });
+
+  it('uses the adapter for authenticated API calls and rejects foreign destinations', async () => {
+    client.authenticated = true;
+    await initialize();
+    await auth.request('/api/v1/polls/mine', { method: 'GET' });
+    expect(client.updateToken).toHaveBeenCalledWith(30);
+    const [url, options] = client.fetch.mock.calls[0];
+    expect(url.origin).toBe(window.location.origin);
+    expect(options.headers.get('Authorization')).toBe('Bearer test-access-token');
+    await expect(auth.request('https://other.example/api/v1/polls', {})).rejects.toThrow();
+    expect(client.fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('returns to a local protected page after sign-in and refuses an external return URL', async () => {
+    await initialize();
+    const original = window.location.href;
+    try {
+      window.history.replaceState({}, '', '/account?returnTo=%2Fpolls%2Fnew');
+      await auth.signIn();
+      expect(client.login).toHaveBeenLastCalledWith({
+        redirectUri: window.location.origin + '/polls/new',
+      });
+      window.history.replaceState({}, '', '/account?returnTo=%2F%09%2Fother.example');
+      await auth.signIn();
+      expect(new URL(client.login.mock.lastCall![0].redirectUri).origin).toBe(
+        window.location.origin,
+      );
+    } finally {
+      window.history.replaceState({}, '', original);
+    }
   });
 
   it('rejects malformed configuration instead of creating an incorrect auth client', () => {

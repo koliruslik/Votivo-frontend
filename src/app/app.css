@@ -1,58 +1,199 @@
-header {
+:host {
+  display: flex;
+  flex-direction: column;
+  min-height: 100dvh;
+}
+.site-header {
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+.header-inner {
+  max-width: 1240px;
+  min-height: 80px;
+  margin: auto;
+  padding: 0 40px;
   display: flex;
   align-items: center;
-  gap: 1.5rem;
-  padding: 1rem 0;
-  border-bottom: 1px solid #ddd;
+  gap: 56px;
 }
-header a {
-  color: inherit;
-  font-size: 1.4rem;
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 1.65rem;
+  font-weight: 750;
+  letter-spacing: -0.07em;
+}
+.brand svg {
+  width: 32px;
+  height: 32px;
+  color: var(--accent);
+}
+.brand-period {
+  color: var(--accent);
+}
+.main-nav {
+  align-self: stretch;
+  display: flex;
+  align-items: stretch;
+  gap: 28px;
+}
+.main-nav a {
+  display: flex;
+  align-items: center;
+  position: relative;
+  color: var(--muted);
+  font-size: 0.925rem;
+  font-weight: 550;
+}
+.main-nav a:hover,
+.main-nav .nav-active {
+  color: var(--ink);
+}
+.nav-active::after {
+  content: '';
+  position: absolute;
+  bottom: -1px;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: var(--accent);
+}
+.account-nav {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 18px;
+}
+.account-link {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 0.875rem;
+  max-width: 210px;
+}
+.account-link > span:last-child {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.avatar {
+  width: 32px;
+  height: 32px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  flex-shrink: 0;
+  font-weight: 650;
+}
+.main-container {
+  width: 100%;
+  max-width: 1240px;
+  padding: 52px 40px 80px;
+  margin: 0 auto;
+  flex: 1;
+  outline: none;
+}
+.site-footer {
+  border-top: 1px solid var(--border);
+  padding: 26px 40px;
+  display: flex;
+  gap: 24px;
+  font-size: 0.875rem;
+  color: var(--muted);
+}
+.footer-brand {
   font-weight: 700;
-  text-decoration: none;
+  color: var(--ink);
 }
-header span {
-  color: #555;
-}
-main {
-  padding: 2rem 0;
-}
-nav {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
+.copyright {
   margin-left: auto;
 }
-button {
-  font: inherit;
-  padding: 0.4rem 0.8rem;
-  border: 1px solid #999;
-  border-radius: 0.3rem;
-  background: white;
-  cursor: pointer;
+.global-notice {
+  background: #fff5e8;
+  color: #694714;
+  padding: 10px 24px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 20px;
+  font-size: 0.875rem;
 }
-button:disabled {
-  cursor: not-allowed;
-  opacity: 0.55;
+.menu-toggle {
+  display: none;
 }
-.account-status {
-  color: #555;
-  font-size: 0.9rem;
-}
-.account-status p {
-  margin: 0.5rem 0;
-}
-.account-name {
-  overflow-wrap: anywhere;
-}
-@media (max-width: 600px) {
-  header {
-    flex-wrap: wrap;
-    gap: 0.75rem;
+@media (max-width: 900px) {
+  .header-inner {
+    gap: 24px;
+    padding: 0 24px;
   }
-  nav {
+  .main-nav {
+    gap: 18px;
+  }
+  .main-container {
+    padding: 36px 24px 60px;
+  }
+  .account-link > span:last-child {
+    display: none;
+  }
+}
+@media (max-width: 640px) {
+  .header-inner {
+    min-height: 72px;
     flex-wrap: wrap;
+    gap: 12px;
+    padding: 0 20px;
+    position: relative;
+  }
+  .brand {
+    font-size: 1.5rem;
+  }
+  .menu-toggle {
+    display: block;
+    order: 3;
+  }
+  .main-nav {
+    display: none;
+    order: 4;
+    width: 100%;
+    padding: 6px 0 20px;
+    flex-direction: column;
+    gap: 0;
+  }
+  .main-nav.mobile-open {
+    display: flex;
+  }
+  .main-nav a {
+    padding: 12px;
+    border-radius: 6px;
+  }
+  .main-nav .nav-active {
+    background: var(--accent-soft);
+  }
+  .nav-active::after {
+    display: none;
+  }
+  .account-nav {
+    gap: 12px;
+  }
+  .account-nav .button {
+    padding: 8px 12px;
+  }
+  .main-container {
+    padding: 30px 20px 48px;
+  }
+  .site-footer {
+    flex-wrap: wrap;
+    gap: 12px 20px;
+    padding: 24px 20px;
+  }
+  .copyright {
     margin-left: 0;
     width: 100%;
+  }
+  .global-notice {
+    align-items: start;
   }
 }

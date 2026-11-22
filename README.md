@@ -1,66 +1,76 @@
 # Votivo Frontend
 
-Angular frontend foundation for Votivo, with a small Keycloak account shell.
+Angular interface for creating polls, voting and reading results. A same-origin Node server serves the production build and routes API requests to Poll, Vote and Result Service.
 
-## Run
+## Run locally
 
-Use Node.js 24.15 or newer within the 24.x release line, and npm.
+Use Node.js 24.16+ in the 24.x line and npm. The backend must include the RabbitMQ integration, not only the older service skeletons.
 
-```bash
-npm ci
-npm start
+```powershell
+npm.cmd ci
+npm.cmd run start:server
 ```
 
-Open `http://localhost:4200`. On Windows, use `npm.cmd` if PowerShell blocks `npm.ps1`.
+In a second terminal:
 
-The public poll page remains available when Keycloak is offline. Sign-in requires the configured Keycloak server.
+```powershell
+npm.cmd start
+```
 
-## Account shell
+Open `http://localhost:4200`. Angular proxies `/api` to the Node server on port 4300. The server defaults to Poll on 18082, Vote on 18083 and Result on 18084. Override its settings using environment variables; `.env.example` lists them. To load that file explicitly, use `node --env-file=.env server/index.mjs` after making a local `.env` copy.
 
-The header offers Sign in and Register. Authentication happens on Keycloak's hosted pages. After sign-in, the header shows the account name and Sign out.
+Sign-in, registration and profile/security settings use Keycloak's hosted pages. Browser settings are in [public/auth-config.json](public/auth-config.json). The frontend client needs an access-token audience mapper for `poll-service`; see [Keycloak setup](docs/keycloak.md).
 
-Non-secret runtime settings live in [public/auth-config.json](public/auth-config.json). The defaults target the integration repository's `votivo` realm and `votivo-frontend` public client at `http://localhost:18080`.
+## Interface
 
-The Register button is enabled in the runtime configuration. The Keycloak administrator must also enable self-registration in the realm. The integration repository's initial realm export still has registration disabled; changing the live realm does not update that export automatically. Set `registrationEnabled: false` to disable the button in an environment without registration.
+- Explore: public polls, server pagination, and search/filter within the current page.
+- My polls: the signed-in user's drafts, open, closed and archived polls.
+- Poll builder: single/multiple-choice questions, ordering, options, visibility, anonymity and vote-change settings. Unsaved edits require confirmation before leaving.
+- Poll page: draft preview, publication, voting, editing/withdrawing permitted votes, sharing, closing, archiving and draft deletion.
+- Results: per-option counts and percentages, total ballots and explicit refresh for asynchronous updates.
+- Moderation: administrator poll list and blocking with confirmation.
+- Account, help, unavailable-service states and a not-found page.
 
-See [Keycloak setup and handoff](docs/keycloak.md) for the exact server settings, DPoP configuration, and acceptance checks. There is no client secret or password form in this frontend.
+Layouts adapt to phones and desktop screens. Fonts are served locally under their included SIL Open Font Licenses.
 
-## Current scope
+## Production build and local Docker
 
-The application has a public `/polls` page, Poll model, and PollService. PollService returns an empty list. The account shell adds sign-in, registration navigation, logout, and session state.
+```powershell
+npm.cmd run build
+$env:PORT = '4200'
+npm.cmd run start:server
+```
 
-Poll creation, vote submission, result visualization, backend API calls, and gateway authorization remain separate work. Account state in the header does not enforce API permissions.
+The Node server serves `dist/votivo-frontend/browser`, including SPA deep links. Runtime auth configuration is served without a long-lived cache.
 
-## Structure
+Alternatively, after the integration backend is running on `votivo_internal`:
 
-- `src/app/app.*` - application shell, account header, initialization, and routes.
-- `src/app/core/auth/` - authentication state, runtime config validation, and Keycloak adapter.
-- `src/app/core/models/` - shared models.
-- `src/app/core/services/` - poll service.
-- `src/app/features/polls/` - public poll-list component.
-- `public/` - runtime auth settings and silent SSO callback.
-- `tests/` - test instructions.
-- `docs/` - development and Keycloak configuration notes.
+```powershell
+docker compose up -d --build --wait
+```
+
+[compose.yml](compose.yml) builds the frontend and joins that existing network. Set `BACKEND_NETWORK` if its name differs. Browser-facing URLs still use the host's address; internal API/JWKS requests use Docker service names. `PUBLIC_ORIGIN` must match the browser URL, including its port.
+
+## API boundary
+
+The browser sends requests only to `/api/v1` on its own origin. The pinned Keycloak adapter refreshes tokens and attaches DPoP proofs. The Node server verifies RS256 access-token signatures, issuer, audience and expiry. For DPoP-bound tokens it also checks the proof signature, key thumbprint, access-token hash, method, URL, time and replay ID. It derives `X-User-ID` from the verified subject and never trusts the browser's identity header.
+
+Vote and result access is checked against Poll Service. Link-only access carries the share token; knowing a poll ID alone does not grant access through this server. Keep Vote and Result private behind the gateway in deployment, because their direct APIs do not implement this boundary themselves.
+
+The server is intended for a single instance. DPoP replay IDs are held in memory for 70 seconds; multi-instance operation and restart-resistant replay protection require a shared replay store. Production requires HTTPS and matching Keycloak URLs. This repository does not claim a completed production infrastructure setup.
 
 ## Checks
 
-```bash
-npm test -- --watch=false
-npm run build
+```powershell
+npm.cmd test -- --watch=false
+npm.cmd run test:server
+npm.cmd run test:e2e
+npm.cmd run build
+npm.cmd run test:production
 ```
 
-Automated tests use a mocked Keycloak adapter and exercise the shell's state transitions and controls. Complete login/registration acceptance requires a configured Keycloak and a test user.
+Browser tests use Chrome locally; on CI they use Playwright Chromium. They run a local identity fixture and intercepted API responses. The separate production browser suite also verifies the built application, silent SSO, session restoration and logout through the Node server. These suites use a test issuer; they do not establish authenticated access in a real Keycloak realm. See [tests](tests/README.md), [architecture](docs/development.md) and the dated [service readiness check](docs/service-readiness.md).
 
-## Continuous integration
+Backend service source and the integration repository's submodule references are managed separately. This frontend does not implement the unfinished User Service APIs; profile and security controls open Keycloak account management.
 
-GitHub Actions runs dependency installation with `npm ci`, the automated tests, and a production build on pull requests targeting `main` and pushes to `main`. The workflow can also be started manually. It uses Node.js 24.16.0 and an npm download cache; no running Keycloak server or secrets are required.
-
-## Team responsibility
-
-Ruslan Kolisnychenko owns the Angular frontend and Result Service. The rest of the team owns User Service, Poll Service, and Vote Service.
-
-[Result Service](https://github.com/koliruslik/Votivo-result-service/tree/main) | [Integration repository](https://github.com/koliruslik/Votivo/tree/main)
-
-## Working locally
-
-Work directly inside `Votivo/frontend` on this repository's feature branch. Commit changes here and review them through a PR. Updating the parent repository's component reference is a separate step.
+[Result Service](https://github.com/koliruslik/Votivo-result-service) | [Integration repository](https://github.com/koliruslik/Votivo)
