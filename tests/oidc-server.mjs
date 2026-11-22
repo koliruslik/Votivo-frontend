@@ -100,7 +100,8 @@ const server = createServer(async (req, res) => {
       sub: 'e2e-user',
       preferred_username: 'alex',
       name: 'Alex Morgan',
-      realm_access: { roles: ['ADMIN'] },
+      // Keycloak realm roles are lower case; the composite `admin` role brings `user` along.
+      realm_access: { roles: ['admin', 'user'] },
       ...(cnf ? { cnf } : {}),
     };
     const sign = (extra, aud) =>
@@ -114,9 +115,10 @@ const server = createServer(async (req, res) => {
     res.setHeader('Content-Type', 'application/json');
     return res.end(
       JSON.stringify({
-        access_token: await sign({}, 'poll-service'),
-        id_token: await sign({ nonce: code?.nonce }, 'votivo-frontend'),
-        refresh_token: await sign({}, 'votivo-frontend'),
+        // Keycloak's `typ`: a bound access token is `DPoP`, an unbound one `Bearer`; the gateway checks it.
+        access_token: await sign({ typ: cnf ? 'DPoP' : 'Bearer' }, 'poll-service'),
+        id_token: await sign({ typ: 'ID', nonce: code?.nonce }, 'votivo-frontend'),
+        refresh_token: await sign({ typ: 'Refresh' }, 'votivo-frontend'),
         token_type: cnf ? 'DPoP' : 'Bearer',
         expires_in: 600,
         refresh_expires_in: 600,
