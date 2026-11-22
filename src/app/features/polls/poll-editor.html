@@ -1,0 +1,203 @@
+<a class="back-link" routerLink="/my-polls">My polls</a>
+<div class="page-heading">
+  <div>
+    <p class="eyebrow">Poll builder</p>
+    <h1>{{ id ? 'Edit your poll' : 'Ask your next question' }}</h1>
+    <p class="lede">Keep it clear. Make every answer count.</p>
+  </div>
+  <span class="badge">Draft</span>
+</div>
+@if (error()) {
+  <div class="notice error" role="alert">
+    {{ error() }}
+    @if (id) {
+      <button class="button" [disabled]="busy()" (click)="reloadDraft()">Reload draft</button>
+    }
+  </div>
+}
+@if (loading()) {
+  <p class="panel loading" role="status">Loading draft…</p>
+} @else if (ready()) {
+  <form class="editor-layout" [attr.aria-busy]="busy()" (submit)="save($event)">
+    <fieldset class="editor-fields" [disabled]="busy()">
+      <div class="stack">
+        <section class="panel form-section">
+          <h2>The essentials</h2>
+          <p class="section-description">Give people enough context to make a choice.</p>
+          <label for="poll-title">Poll title <span class="required">*</span></label
+          ><input
+            id="poll-title"
+            required
+            maxlength="200"
+            placeholder="What would you like to ask?"
+            [value]="form().title"
+            (input)="update('title', $any($event.target).value)"
+          />
+          <label for="poll-description">Description <span class="optional">Optional</span></label
+          ><textarea
+            id="poll-description"
+            rows="3"
+            maxlength="5000"
+            placeholder="Add a little background…"
+            [value]="form().description"
+            (input)="update('description', $any($event.target).value)"
+          ></textarea>
+        </section>
+        @for (question of form().questions; track question; let qi = $index) {
+          <section class="panel form-section question-editor">
+            <div class="section-header">
+              <h2>Question {{ qi + 1 }}</h2>
+              <div class="compact-actions">
+                <button
+                  class="icon-button"
+                  type="button"
+                  [disabled]="qi === 0"
+                  (click)="move(qi, -1)"
+                  [attr.aria-label]="'Move question ' + (qi + 1) + ' up'"
+                >
+                  ↑</button
+                ><button
+                  class="icon-button"
+                  type="button"
+                  [disabled]="qi === form().questions.length - 1"
+                  (click)="move(qi, 1)"
+                  [attr.aria-label]="'Move question ' + (qi + 1) + ' down'"
+                >
+                  ↓</button
+                ><button
+                  class="text-button danger"
+                  type="button"
+                  [disabled]="form().questions.length === 1"
+                  (click)="removeQuestion(qi)"
+                >
+                  Remove
+                </button>
+              </div>
+            </div>
+            <label [for]="'question-' + qi">Question <span class="required">*</span></label
+            ><input
+              [id]="'question-' + qi"
+              required
+              maxlength="2000"
+              placeholder="Write your question"
+              [value]="question.text"
+              (input)="question.text = $any($event.target).value; touch()"
+            />
+            <label [for]="'type-' + qi">Answer type</label
+            ><select
+              [id]="'type-' + qi"
+              [value]="question.type"
+              (change)="question.type = $any($event.target).value; touch()"
+            >
+              <option value="SINGLE">Single choice</option>
+              <option value="MULTIPLE">Multiple choice</option>
+            </select>
+            <div class="field-heading">
+              Answer options <span class="optional">2–20 options</span>
+            </div>
+            @for (option of question.options; track option; let oi = $index) {
+              <div class="option-editor">
+                <span
+                  class="option-marker"
+                  [class.square]="question.type === 'MULTIPLE'"
+                  aria-hidden="true"
+                ></span
+                ><input
+                  required
+                  maxlength="1000"
+                  [attr.aria-label]="'Question ' + (qi + 1) + ', option ' + (oi + 1)"
+                  [placeholder]="'Option ' + (oi + 1)"
+                  [value]="option.text"
+                  (input)="option.text = $any($event.target).value; touch()"
+                /><button
+                  class="icon-button"
+                  type="button"
+                  [disabled]="question.options.length <= 2"
+                  [attr.aria-label]="'Remove option ' + (oi + 1)"
+                  (click)="removeOption(qi, oi)"
+                >
+                  ×
+                </button>
+              </div>
+            }
+            <button
+              class="text-button"
+              type="button"
+              [disabled]="question.options.length >= 20"
+              (click)="addOption(qi)"
+            >
+              ＋ Add option
+            </button>
+          </section>
+        }
+        <button
+          class="button add-question"
+          type="button"
+          [disabled]="form().questions.length >= 50"
+          (click)="addQuestion()"
+        >
+          ＋ Add question
+        </button>
+      </div>
+      <aside class="stack editor-aside">
+        <section class="panel form-section">
+          <h2>Poll settings</h2>
+          <label for="access">Who can find it?</label
+          ><select
+            id="access"
+            [value]="form().accessType"
+            (change)="update('accessType', $any($event.target).value)"
+          >
+            <option value="PUBLIC">Everyone · public</option>
+            <option value="LINK">People with the link</option>
+          </select>
+          <p class="hint">
+            {{
+              form().accessType === 'PUBLIC'
+                ? 'Appears in Explore once published.'
+                : 'Hidden from Explore. Share its unique link after publishing.'
+            }}
+          </p>
+          <label class="check-setting"
+            ><input
+              type="checkbox"
+              [checked]="form().anonymous"
+              (change)="setAnonymous($any($event.target).checked)"
+            /><span
+              >Anonymous responses<small
+                >Answers are stored without a link to the voter.</small
+              ></span
+            ></label
+          >
+          <label class="check-setting"
+            ><input
+              type="checkbox"
+              [checked]="form().allowVoteChange"
+              [disabled]="form().anonymous"
+              (change)="form().allowVoteChange = $any($event.target).checked; touch()"
+            /><span
+              >Allow vote changes<small>{{
+                form().anonymous
+                  ? 'Unavailable for anonymous polls.'
+                  : 'Voters can update or withdraw their answer.'
+              }}</small></span
+            ></label
+          >
+        </section>
+        <section class="panel form-section muted-panel">
+          <h3>Ready when you are</h3>
+          <p class="hint">
+            Save a draft first. You can review everything before publishing. Questions cannot be
+            edited after publication.
+          </p>
+          <button class="button primary full" type="submit" [disabled]="busy()">
+            {{ busy() ? 'Saving…' : 'Save draft' }}</button><a
+            class="button full"
+            routerLink="/my-polls"
+            >Cancel</a
+          >
+        </section>
+      </aside>
+    </fieldset>
+  </form>
+}

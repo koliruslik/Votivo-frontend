@@ -39,5 +39,17 @@ jobs:
       - name: Run tests
         run: npm test -- --watch=false
 
+      - name: Verify API gateway
+        run: npm run test:server
+
       - name: Build production bundle
         run: npm run build
+
+      - name: Install browser
+        run: npx playwright install --with-deps chromium
+
+      - name: Verify desktop and mobile flows
+        run: npm run test:e2e
+
+      - name: Verify production SSO
+        run: npm run test:production

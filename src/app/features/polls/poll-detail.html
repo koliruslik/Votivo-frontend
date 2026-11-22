@@ -1,0 +1,341 @@
+<a class="back-link" routerLink="/polls">Explore polls</a>
+@if (loading()) {
+  <p class="panel loading" role="status">Loading poll…</p>
+} @else if (error()) {
+  <div class="panel empty-state">
+    <h1>Poll unavailable</h1>
+    <p role="alert">{{ error() }}</p>
+    <button class="button" (click)="load()">Try again</button>
+  </div>
+} @else if (poll(); as p) {
+  <div class="detail-heading">
+    <div class="card-top">
+      <app-poll-badge [status]="p.status" [blocked]="p.blocked" /><span class="meta"
+        >{{ p.accessType === 'LINK' ? 'Link only' : 'Public poll' }} ·
+        {{ p.anonymous ? 'Anonymous' : 'Account-based' }}</span
+      >
+    </div>
+    <h1>{{ p.title }}</h1>
+    @if (p.description) {
+      <p class="poll-description">{{ p.description }}</p>
+    }
+    <p class="meta">
+      Created {{ p.createdAt | date: 'mediumDate' }} · {{ p.questions.length }}
+      {{ p.questions.length === 1 ? 'question' : 'questions' }}
+    </p>
+  </div>
+  @if (notice()) {
+    <div class="notice success" role="status">
+      {{ notice()
+      }}<button class="icon-button" aria-label="Dismiss notification" (click)="notice.set('')">
+        ×
+      </button>
+    </div>
+  }
+  <div class="detail-layout">
+    <div class="stack">
+      @if (p.status !== 'DRAFT') {
+        <div class="tabs" role="tablist" (keydown)="tabKey($event)" aria-label="Poll view">
+          <button
+            id="vote-tab"
+            role="tab"
+            [attr.aria-selected]="tab() === 'vote'"
+            [attr.tabindex]="tab() === 'vote' ? 0 : -1"
+            [class.selected]="tab() === 'vote'"
+            aria-controls="vote-panel"
+            (click)="tab.set('vote')"
+          >
+            {{ status()?.voted ? 'Your response' : 'Vote' }}</button><button
+            id="results-tab"
+            role="tab"
+            [attr.aria-selected]="tab() === 'results'"
+            [attr.tabindex]="tab() === 'results' ? 0 : -1"
+            [class.selected]="tab() === 'results'"
+            aria-controls="results-panel"
+            (click)="showResults()"
+          >
+            Results
+          </button>
+        </div>
+      }
+      @if (voteError()) {
+        <div class="notice error" role="alert">
+          {{ voteError() }}
+          @if (!status() && auth.authenticated()) {
+            <button class="button" (click)="loadVoteStatus(p.id)">Retry</button>
+          } @else {
+            <button class="button" [disabled]="busy()" (click)="load()">Refresh poll</button>
+          }
+        </div>
+      }
+      @if (tab() === 'vote') {
+        <div
+          id="vote-panel"
+          [attr.role]="p.status === 'DRAFT' ? null : 'tabpanel'"
+          [attr.aria-labelledby]="p.status === 'DRAFT' ? null : 'vote-tab'"
+          class="stack"
+        >
+          @if (p.status === 'DRAFT') {
+            <div class="notice">
+              This is a draft preview. Publish it when you are ready to collect responses.
+            </div>
+          } @else if (!open()) {
+            <div class="notice">
+              {{ p.blocked ? 'This poll has been blocked.' : 'Voting has ended.' }} You can still
+              explore the results.
+            </div>
+          } @else if (!auth.authenticated()) {
+            <div class="notice">
+              <div>
+                <strong>Sign in to add your voice</strong>
+                <p>
+                  One account, one vote.
+                  {{
+                    p.anonymous
+                      ? 'Your answers remain anonymous.'
+                      : 'Your response is saved to your account.'
+                  }}
+                </p>
+              </div>
+              <a
+                class="button primary"
+                routerLink="/account"
+                [queryParams]="{ returnTo: routerUrl }"
+                >Sign in</a
+              >
+            </div>
+          } @else if (status()?.voted && !changing()) {
+            <div class="notice success">
+              <div>
+                <strong>Your vote is in</strong>
+                <p>
+                  {{
+                    p.anonymous
+                      ? 'This anonymous response cannot be changed or withdrawn.'
+                      : p.allowVoteChange
+                        ? 'You can update your choices while voting is open.'
+                        : 'This poll does not allow vote changes.'
+                  }}
+                </p>
+              </div>
+              @if (p.allowVoteChange && !p.anonymous) {
+                <button class="button" (click)="changing.set(true)">Edit response</button>
+              }
+            </div>
+          }
+          <form class="stack" (submit)="submit($event)">
+            @for (q of p.questions; track q.id; let qi = $index) {
+              <fieldset class="panel vote-question" [disabled]="!editableVote() || busy()">
+                <legend>
+                  <span class="question-number">{{ qi + 1 }}</span>{{ q.text }}
+                </legend>
+                <p class="hint">
+                  {{ q.type === 'MULTIPLE' ? 'Select all that apply' : 'Choose one answer' }}
+                </p>
+                @for (option of q.options; track option.id) {
+                  <label class="vote-option" [class.chosen]="selected()[q.id]?.includes(option.id)"
+                    ><input
+                      [type]="q.type === 'MULTIPLE' ? 'checkbox' : 'radio'"
+                      [name]="q.id"
+                      [value]="option.id"
+                      [checked]="selected()[q.id]?.includes(option.id) ?? false"
+                      (change)="select(q.id, option.id, q.type === 'MULTIPLE')"
+                    /><span>{{ option.text }}</span></label
+                  >
+                }
+              </fieldset>
+            }
+            @if (auth.authenticated() && editableVote()) {
+              <div class="vote-submit">
+                <span class="hint">{{
+                  p.anonymous ? 'Your response is anonymous.' : 'Your response will be saved.'
+                }}</span>
+                <div class="compact-actions">
+                  @if (changing()) {
+                    <button
+                      class="button"
+                      type="button"
+                      [disabled]="busy()"
+                      (click)="cancelChange()"
+                    >
+                      Cancel
+                    </button>
+                  }
+                  <button class="button primary" type="submit" [disabled]="busy()">
+                    {{ busy() ? 'Saving…' : changing() ? 'Save changes' : 'Submit vote' }}
+                  </button>
+                </div>
+              </div>
+            }
+          </form>
+          @if (
+            auth.authenticated() && open() && status()?.voted && p.allowVoteChange && !p.anonymous
+          ) {
+            <button
+              class="text-button danger self-start"
+              [disabled]="busy()"
+              (click)="ask('revoke')"
+            >
+              Withdraw my vote
+            </button>
+          }
+        </div>
+      } @else {
+        <section id="results-panel" role="tabpanel" aria-labelledby="results-tab" class="stack">
+          <div class="panel result-overview">
+            <div>
+              <p class="eyebrow">Total responses</p>
+              <strong class="result-total">{{ results()?.totalVotes ?? '—' }}</strong>
+              <p class="hint">Each response counts once, even with multiple choices.</p>
+            </div>
+            <button class="button" [disabled]="resultsLoading()" (click)="refreshResults()">
+              {{ resultsLoading() ? 'Refreshing…' : 'Refresh results' }}
+            </button>
+          </div>
+          <p class="hint">
+            Results update as votes are processed. Refresh to see the latest counts.
+          </p>
+          @if (resultError()) {
+            <div class="notice error" role="alert">{{ resultError() }}</div>
+          }
+          @if (results(); as r) {
+            @if (r.status === 'UNKNOWN' || !r.questions.length) {
+              <div class="panel empty-state">
+                <h2>Results are on their way</h2>
+                <p>The poll may still be syncing. Refresh in a moment.</p>
+              </div>
+            }
+            @for (q of r.questions; track q.questionId; let qi = $index) {
+              <section class="panel form-section">
+                <h2>
+                  <span class="question-number">{{ qi + 1 }}</span>{{ q.text || 'Question' }}
+                </h2>
+                <p class="hint">
+                  {{
+                    q.multiple
+                      ? 'Multiple choices allowed · percentages may add up to more than 100%'
+                      : 'Single choice'
+                  }}
+                </p>
+                @for (option of q.options; track option.optionId) {
+                  <div class="result-option">
+                    <div class="result-label">
+                      <span>{{ option.text || 'Option' }}</span><span
+                        ><strong>{{ percent(option.votes) | number: '1.0-1' }}%</strong
+                        ><span class="meta"> · {{ option.votes }} votes</span></span
+                      >
+                    </div>
+                    <div
+                      class="result-track"
+                      role="meter"
+                      [attr.aria-label]="option.text"
+                      aria-valuemin="0"
+                      aria-valuemax="100"
+                      [attr.aria-valuenow]="percent(option.votes)"
+                    >
+                      <div [style.width.%]="percent(option.votes)"></div>
+                    </div>
+                  </div>
+                }
+              </section>
+            }
+          }
+        </section>
+      }
+    </div>
+    <aside class="stack">
+      @if (owner()) {
+        <section class="panel form-section">
+          <h2>Manage poll</h2>
+          <p class="hint">
+            {{
+              p.status === 'DRAFT'
+                ? 'Review your questions before publishing.'
+                : 'Questions are locked after publication.'
+            }}
+          </p>
+          <div class="stack small-gap">
+            @if (p.status === 'DRAFT' && !p.blocked) {
+              <a class="button" [routerLink]="['/polls', p.id, 'edit']">Edit draft</a
+              ><button class="button primary" [disabled]="busy()" (click)="ask('publish')">
+                Publish poll</button
+              ><button class="text-button danger" [disabled]="busy()" (click)="ask('delete')">
+                Delete draft
+              </button>
+            }
+            @if (open()) {
+              <button class="button" [disabled]="busy()" (click)="ask('close')">
+                Close voting
+              </button>
+            }
+            @if (p.status === 'CLOSED' && !p.blocked) {
+              <button class="button" [disabled]="busy()" (click)="ask('archive')">
+                Archive poll
+              </button>
+            }
+          </div>
+        </section>
+      }
+      @if (shareUrl() && p.status !== 'DRAFT' && !p.blocked) {
+        <section class="panel form-section">
+          <h2>Invite a response</h2>
+          <p class="hint">
+            {{
+              p.accessType === 'LINK'
+                ? 'Anyone with this link can open your poll.'
+                : 'Share this poll with your community.'
+            }}
+          </p>
+          <label class="sr-only" for="share-url">Poll link</label
+          ><input
+            id="share-url"
+            class="share-field"
+            readonly
+            [value]="shareUrl()"
+            (focus)="$any($event.target).select()"
+          /><button class="button full" (click)="copyLink()">Copy link</button>
+        </section>
+      }
+      <section class="panel form-section muted-panel">
+        <h3>A note on voting</h3>
+        <p class="hint">
+          {{
+            p.anonymous
+              ? 'Sign-in prevents duplicate votes. Your answers are stored separately from your account.'
+              : 'Sign-in ensures each person can respond only once.'
+          }}
+        </p>
+        <p class="hint">
+          {{
+            p.allowVoteChange && !p.anonymous
+              ? 'You can change or withdraw your vote until voting closes.'
+              : 'Responses cannot be changed after submission.'
+          }}
+        </p>
+      </section>
+      @if (auth.isAdmin() && !p.blocked) {
+        <section class="panel form-section">
+          <h3>Moderation</h3>
+          <button class="button danger full" [disabled]="busy()" (click)="ask('block')">
+            Block poll
+          </button>
+        </section>
+      }
+    </aside>
+  </div>
+}
+<dialog #confirmation class="confirm-dialog">
+  <h2>{{ actions[pending()].title }}</h2>
+  <p>{{ actions[pending()].detail }}</p>
+  <div class="dialog-actions">
+    <button class="button" autofocus (click)="confirmation.close()">Cancel</button
+    ><button
+      class="button"
+      [class.primary]="pending() === 'publish'"
+      [class.danger]="pending() !== 'publish'"
+      (click)="confirm()"
+    >
+      {{ actions[pending()].button }}
+    </button>
+  </div>
+</dialog>
