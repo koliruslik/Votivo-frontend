@@ -14,7 +14,7 @@ export default defineConfig({
   webServer: [
     {
       command: 'node server/index.mjs',
-      env: { PORT: '4200', PUBLIC_ORIGIN: 'http://localhost:4200' },
+      env: { PORT: '4200', PUBLIC_ORIGIN: 'http://localhost:4200', INTERNAL_AUTH_SECRET: 'e2e-secret' },
       url: 'http://localhost:4200/health',
       reuseExistingServer: false,
     },

@@ -14,6 +14,8 @@ services:
       KEYCLOAK_ISSUER: ${KEYCLOAK_ISSUER:-http://localhost:18080/realms/votivo}
       KEYCLOAK_JWKS_URL: http://keycloak:8080/realms/votivo/protocol/openid-connect/certs
       KEYCLOAK_AUDIENCE: poll-service
+      INTERNAL_AUTH_SECRET: ${INTERNAL_AUTH_SECRET:?Set the secret shared with Poll, Vote and Result}
+      REQUIRE_DPOP: ${REQUIRE_DPOP:-true}
     healthcheck:
       test:
         [
