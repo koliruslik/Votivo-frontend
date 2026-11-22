@@ -148,7 +148,7 @@ export class AuthService {
     const claims = client.idTokenParsed ?? client.tokenParsed;
     this.currentUser.set(claims?.['name'] ?? claims?.['preferred_username'] ?? 'Account');
     this.subject.set(client.tokenParsed?.sub ?? '');
-    this.admin.set(client.hasRealmRole?.('ADMIN') ?? false);
+    this.admin.set(client.hasRealmRole?.('admin') ?? false);
     this.currentMessage.set(null);
     this.currentStatus.set('authenticated');
   }

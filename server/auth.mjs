@@ -7,7 +7,13 @@ import {
   jwtVerify,
 } from 'jose';
 
-export function createAuthenticator({ issuer, audience, jwksUrl, keySet }) {
+/**
+ * Verifies an access token issued by Keycloak for this API: signature through the JWKS, RS256 only, issuer, expiry and
+ * audience. ID and refresh tokens are refused by `typ` (`Bearer`, or `DPoP` for a bound token). With `requireDpop` (the default) only a DPoP-bound token is
+ * accepted, so a stolen token cannot be replayed as a plain Bearer and an unbound token cannot downgrade the check.
+ * The user is the verified `sub`; roles are the realm roles `user` and `admin` (admin includes user).
+ */
+export function createAuthenticator({ issuer, audience, jwksUrl, keySet, requireDpop = true }) {
   const keys = keySet ?? createRemoteJWKSet(new URL(jwksUrl), { timeoutDuration: 5000 });
   const usedProofs = new Map();
   return async (authorization, proof, method, url) => {
@@ -23,7 +29,10 @@ export function createAuthenticator({ issuer, audience, jwksUrl, keySet }) {
     });
     if (typeof payload.sub !== 'string' || !payload.sub.trim() || payload.sub.length > 255)
       throw new Error('Invalid subject');
+    // Keycloak types an access token `Bearer`, or `DPoP` when it is bound to a key; ID and refresh tokens differ.
+    if (payload.typ !== 'Bearer' && payload.typ !== 'DPoP') throw new Error('Not an access token');
     const thumbprint = payload.cnf?.jkt;
+    if (!thumbprint && requireDpop) throw new Error('DPoP-bound token required');
     if (thumbprint) {
       if (scheme.toLowerCase() !== 'dpop' || !proof) throw new Error('DPoP required');
       const header = decodeProtectedHeader(proof);
@@ -60,11 +69,8 @@ export function createAuthenticator({ issuer, audience, jwksUrl, keySet }) {
       if (usedProofs.has(id) || usedProofs.size >= 100000) throw new Error('Proof replay rejected');
       usedProofs.set(id, now + 70000);
     } else if (scheme.toLowerCase() !== 'bearer') throw new Error('Unexpected proof scheme');
-    return {
-      subject: payload.sub,
-      token,
-      admin:
-        Array.isArray(payload.realm_access?.roles) && payload.realm_access.roles.includes('ADMIN'),
-    };
+    const roles = Array.isArray(payload.realm_access?.roles) ? payload.realm_access.roles : [];
+    const admin = roles.includes('admin');
+    return { subject: payload.sub, token, admin, user: admin || roles.includes('user') };
   };
 }

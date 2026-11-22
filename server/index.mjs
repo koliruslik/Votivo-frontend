@@ -21,6 +21,7 @@ export function createApp(options = {}) {
     options.authenticate ??
     createAuthenticator({
       issuer,
+      requireDpop: process.env['REQUIRE_DPOP'] !== 'false',
       audience: process.env['KEYCLOAK_AUDIENCE'] ?? 'poll-service',
       jwksUrl: process.env['KEYCLOAK_JWKS_URL'] ?? `${issuer}/protocol/openid-connect/certs`,
     });
@@ -34,9 +35,12 @@ export function createApp(options = {}) {
     res.writeHead(status, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
     res.end(JSON.stringify({ message }));
   };
+  // Poll, Vote and Result trust the identity this gateway forwards, so they only accept calls that carry this secret.
+  const internalSecret = options.internalSecret ?? process.env['INTERNAL_AUTH_SECRET'];
   const upstream = (target, path, init = {}) =>
     fetch(new URL(path, target), {
       ...init,
+      headers: { ...init.headers, ...(internalSecret ? { 'X-Internal-Auth': internalSecret } : {}) },
       redirect: 'manual',
       signal: AbortSignal.timeout(12000),
     });
@@ -96,11 +100,14 @@ export function createApp(options = {}) {
             req.method,
             new URL(req.url, origin).href,
           );
-        } catch {
+        } catch (error) {
+          // The reason only (never the token): jose and the proof checks name what failed.
+          console.warn(`auth rejected: ${req.method} ${url.pathname}: ${error?.code ?? ''} ${error?.message ?? error}`);
           res.setHeader('WWW-Authenticate', 'DPoP, Bearer');
           return send(res, 401, 'Invalid or expired session');
         }
       }
+      if (identity && !identity.user) return send(res, 403, 'Insufficient role');
       if ((vote || adminRoute || path.endsWith('/mine') || req.method !== 'GET') && !identity)
         return send(res, 401, 'Sign in required');
       if (adminRoute && !identity?.admin) return send(res, 403, 'Administrator required');
@@ -163,6 +170,10 @@ export function createApp(options = {}) {
   });
 }
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  if (!process.env['INTERNAL_AUTH_SECRET']) {
+    console.error('INTERNAL_AUTH_SECRET is required: Poll, Vote and Result only accept calls that carry it.');
+    process.exit(1);
+  }
   const port = Number(process.env['PORT'] ?? 4300);
   const server = createApp();
   server.listen(port, '0.0.0.0', () => console.log(`Votivo server: http://localhost:${port}`));

@@ -17,9 +17,11 @@ const path = '/api/v1/polls/11111111-1111-4111-8111-111111111111/vote';
 const accessKey = await generateKeyPair('RS256');
 const jwk = await exportJWK(accessKey.publicKey);
 const keySet = createLocalJWKSet({ keys: [{ ...jwk, kid: 'test', alg: 'RS256' }] });
-const makeAuth = () => createAuthenticator({ issuer, audience: 'poll-service', keySet });
+const makeAuth = () =>
+  createAuthenticator({ issuer, audience: 'poll-service', keySet, requireDpop: false });
+const makeStrictAuth = () => createAuthenticator({ issuer, audience: 'poll-service', keySet });
 async function token(extra = {}, settings = {}) {
-  return new SignJWT({ sub: 'real-user', ...extra })
+  return new SignJWT({ sub: 'real-user', typ: 'Bearer', realm_access: { roles: ['user'] }, ...extra })
     .setProtectedHeader({ alg: 'RS256', kid: 'test' })
     .setIssuer(settings.issuer ?? issuer)
     .setAudience(settings.audience ?? 'poll-service')
@@ -41,13 +43,71 @@ async function dpop(accessToken, key, extra = {}) {
 }
 test('accepts a signed access token and derives the user and admin role from verified claims', async () => {
   const result = await makeAuth()(
-    `Bearer ${await token({ realm_access: { roles: ['ADMIN'] } })}`,
+    `Bearer ${await token({ realm_access: { roles: ['admin'] } })}`,
     undefined,
     'POST',
     origin + path,
   );
   assert.equal(result.subject, 'real-user');
   assert.equal(result.admin, true);
+  assert.equal(result.user, true, 'admin includes the user role');
+});
+test('maps the Keycloak realm roles user and admin exactly', async () => {
+  const roles = async (list) =>
+    makeAuth()(
+      `Bearer ${await token({ realm_access: { roles: list } })}`,
+      undefined,
+      'GET',
+      origin + path,
+    );
+  assert.deepEqual(
+    ((r) => [r.user, r.admin])(await roles(['user'])),
+    [true, false],
+  );
+  assert.deepEqual(((r) => [r.user, r.admin])(await roles(['admin'])), [true, true]);
+  assert.deepEqual(((r) => [r.user, r.admin])(await roles(['offline_access'])), [false, false]);
+  // Role names are lower case in the realm: look-alikes grant nothing.
+  assert.deepEqual(((r) => [r.user, r.admin])(await roles(['ADMIN', 'USER'])), [false, false]);
+});
+test('accepts only access tokens: ID, refresh and untyped tokens are refused', async () => {
+  const auth = makeAuth();
+  // Keycloak types a DPoP-bound access token `DPoP`; it must pass, the other token kinds must not.
+  assert.equal(
+    (await auth(`Bearer ${await token({ typ: 'DPoP' })}`, undefined, 'GET', origin + path)).subject,
+    'real-user',
+  );
+  for (const extra of [{ typ: 'ID' }, { typ: 'Refresh' }, { typ: 'Offline' }, { typ: undefined }])
+    await assert.rejects(
+      auth(`Bearer ${await token(extra)}`, undefined, 'GET', origin + path),
+      /access token/i,
+    );
+});
+test('refuses unsigned and algorithm-confused tokens', async () => {
+  const auth = makeAuth();
+  const body = Buffer.from(
+    JSON.stringify({ sub: 'u', typ: 'Bearer', iss: issuer, aud: 'poll-service', exp: 9999999999 }),
+  ).toString('base64url');
+  const none = Buffer.from('{"alg":"none"}').toString('base64url');
+  await assert.rejects(auth(`Bearer ${none}.${body}.`, undefined, 'GET', origin + path));
+  // HS256 signed with the public key as the secret (classic key-confusion attack).
+  const hs = await new SignJWT({ sub: 'u', typ: 'Bearer' })
+    .setProtectedHeader({ alg: 'HS256', kid: 'test' })
+    .setIssuer(issuer)
+    .setAudience('poll-service')
+    .setExpirationTime('5m')
+    .sign(new TextEncoder().encode(JSON.stringify(jwk)));
+  await assert.rejects(auth(`Bearer ${hs}`, undefined, 'GET', origin + path));
+});
+test('requires a DPoP-bound token by default (no Bearer downgrade through an unbound token)', async () => {
+  const unbound = await token();
+  await assert.rejects(
+    makeStrictAuth()(`Bearer ${unbound}`, undefined, 'GET', origin + path),
+    /DPoP-bound/,
+  );
+  await assert.rejects(
+    makeStrictAuth()(`DPoP ${unbound}`, 'x.y.z', 'GET', origin + path),
+    /DPoP-bound/,
+  );
 });
 test('rejects expired tokens, wrong issuer, wrong audience and a forged signature', async () => {
   const auth = makeAuth();
@@ -91,6 +151,17 @@ test('validates DPoP signature, token binding, URL, method, timestamp and reject
   );
   await assert.rejects(auth(`DPoP ${accessToken}`, proof, 'POST', origin + path));
   await assert.rejects(auth(`Bearer ${accessToken}`, undefined, 'POST', origin + path));
+  await assert.rejects(auth(`DPoP ${accessToken}`, undefined, 'POST', origin + path), /DPoP required/);
+  const noType = await new SignJWT({
+    htm: 'POST',
+    htu: origin + path,
+    ath: createHash('sha256').update(accessToken).digest('base64url'),
+    jti: randomUUID(),
+  })
+    .setIssuedAt()
+    .setProtectedHeader({ alg: 'ES256', jwk: await exportJWK(key.publicKey) })
+    .sign(key.privateKey);
+  await assert.rejects(auth(`DPoP ${accessToken}`, noType, 'POST', origin + path));
   for (const extra of [
     { htm: 'GET' },
     { htu: 'https://evil.test' + path },
@@ -124,8 +195,10 @@ async function listen(server) {
 test('gateway rejects forged identity, protects private results, and forwards only verified X-User-ID', async (t) => {
   const { createServer } = await import('node:http');
   let forwarded;
+  let internal;
   let publicAccess = true;
   const backend = createServer((req, res) => {
+    internal = req.headers['x-internal-auth'];
     if (req.url.endsWith('/vote')) {
       forwarded = req.headers['x-user-id'];
       res.setHeader('Content-Type', 'application/json');
@@ -144,6 +217,7 @@ test('gateway rejects forged identity, protects private results, and forwards on
   const app = createApp({
     origin: 'http://localhost:4200',
     authenticate: makeAuth(),
+    internalSecret: 'gateway-secret',
     targets: { poll: target, vote: target, result: target },
   });
   const gateway = await listen(app);
@@ -160,6 +234,25 @@ test('gateway rejects forged identity, protects private results, and forwards on
   });
   assert.equal(response.status, 200);
   assert.equal(forwarded, 'real-user');
+  assert.equal(internal, 'gateway-secret', 'services only trust calls that carry the gateway secret');
+  const roleless = await fetch(gateway + path, {
+    headers: { Authorization: `Bearer ${await token({ realm_access: { roles: [] } })}` },
+  });
+  assert.equal(roleless.status, 403, 'a valid token without user/admin role is refused');
+  const idToken = await fetch(gateway + path, {
+    headers: { Authorization: `Bearer ${await token({ typ: 'ID' })}` },
+  });
+  assert.equal(idToken.status, 401);
+  assert.equal(
+    (
+      await fetch(gateway + '/api/v1/admin/polls', {
+        headers: {
+          Authorization: `Bearer ${await token({ realm_access: { roles: ['admin'] } })}`,
+        },
+      })
+    ).status,
+    200,
+  );
   publicAccess = false;
   assert.equal((await fetch(gateway + path.replace('/vote', '/results'))).status, 404);
   assert.equal(
