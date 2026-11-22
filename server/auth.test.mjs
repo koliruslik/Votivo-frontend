@@ -21,7 +21,12 @@ const makeAuth = () =>
   createAuthenticator({ issuer, audience: 'poll-service', keySet, requireDpop: false });
 const makeStrictAuth = () => createAuthenticator({ issuer, audience: 'poll-service', keySet });
 async function token(extra = {}, settings = {}) {
-  return new SignJWT({ sub: 'real-user', typ: 'Bearer', realm_access: { roles: ['user'] }, ...extra })
+  return new SignJWT({
+    sub: 'real-user',
+    typ: 'Bearer',
+    realm_access: { roles: ['user'] },
+    ...extra,
+  })
     .setProtectedHeader({ alg: 'RS256', kid: 'test' })
     .setIssuer(settings.issuer ?? issuer)
     .setAudience(settings.audience ?? 'poll-service')
@@ -60,10 +65,7 @@ test('maps the Keycloak realm roles user and admin exactly', async () => {
       'GET',
       origin + path,
     );
-  assert.deepEqual(
-    ((r) => [r.user, r.admin])(await roles(['user'])),
-    [true, false],
-  );
+  assert.deepEqual(((r) => [r.user, r.admin])(await roles(['user'])), [true, false]);
   assert.deepEqual(((r) => [r.user, r.admin])(await roles(['admin'])), [true, true]);
   assert.deepEqual(((r) => [r.user, r.admin])(await roles(['offline_access'])), [false, false]);
   // Role names are lower case in the realm: look-alikes grant nothing.
@@ -151,7 +153,10 @@ test('validates DPoP signature, token binding, URL, method, timestamp and reject
   );
   await assert.rejects(auth(`DPoP ${accessToken}`, proof, 'POST', origin + path));
   await assert.rejects(auth(`Bearer ${accessToken}`, undefined, 'POST', origin + path));
-  await assert.rejects(auth(`DPoP ${accessToken}`, undefined, 'POST', origin + path), /DPoP required/);
+  await assert.rejects(
+    auth(`DPoP ${accessToken}`, undefined, 'POST', origin + path),
+    /DPoP required/,
+  );
   const noType = await new SignJWT({
     htm: 'POST',
     htu: origin + path,
@@ -234,7 +239,11 @@ test('gateway rejects forged identity, protects private results, and forwards on
   });
   assert.equal(response.status, 200);
   assert.equal(forwarded, 'real-user');
-  assert.equal(internal, 'gateway-secret', 'services only trust calls that carry the gateway secret');
+  assert.equal(
+    internal,
+    'gateway-secret',
+    'services only trust calls that carry the gateway secret',
+  );
   const roleless = await fetch(gateway + path, {
     headers: { Authorization: `Bearer ${await token({ realm_access: { roles: [] } })}` },
   });

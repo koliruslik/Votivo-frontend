@@ -40,7 +40,10 @@ export function createApp(options = {}) {
   const upstream = (target, path, init = {}) =>
     fetch(new URL(path, target), {
       ...init,
-      headers: { ...init.headers, ...(internalSecret ? { 'X-Internal-Auth': internalSecret } : {}) },
+      headers: {
+        ...init.headers,
+        ...(internalSecret ? { 'X-Internal-Auth': internalSecret } : {}),
+      },
       redirect: 'manual',
       signal: AbortSignal.timeout(12000),
     });
@@ -102,7 +105,9 @@ export function createApp(options = {}) {
           );
         } catch (error) {
           // The reason only (never the token): jose and the proof checks name what failed.
-          console.warn(`auth rejected: ${req.method} ${url.pathname}: ${error?.code ?? ''} ${error?.message ?? error}`);
+          console.warn(
+            `auth rejected: ${req.method} ${url.pathname}: ${error?.code ?? ''} ${error?.message ?? error}`,
+          );
           res.setHeader('WWW-Authenticate', 'DPoP, Bearer');
           return send(res, 401, 'Invalid or expired session');
         }
@@ -157,6 +162,10 @@ export function createApp(options = {}) {
         url.pathname + url.search,
         { method: req.method, headers, body },
       );
+      if (response.status >= 400)
+        console.warn(
+          `upstream ${response.status}: ${req.method} ${url.pathname} (${vote ? 'vote' : result ? 'result' : 'poll'}, ${identity ? 'signed in' : 'anonymous'}) ${response.headers.get('www-authenticate') ?? ''}`,
+        );
       if (response.status >= 300 && response.status < 400)
         return send(res, 502, 'Unexpected service redirect');
       res.writeHead(response.status, {
@@ -171,7 +180,9 @@ export function createApp(options = {}) {
 }
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   if (!process.env['INTERNAL_AUTH_SECRET']) {
-    console.error('INTERNAL_AUTH_SECRET is required: Poll, Vote and Result only accept calls that carry it.');
+    console.error(
+      'INTERNAL_AUTH_SECRET is required: Poll, Vote and Result only accept calls that carry it.',
+    );
     process.exit(1);
   }
   const port = Number(process.env['PORT'] ?? 4300);
