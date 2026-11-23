@@ -1,0 +1,221 @@
+:host {
+  display: block;
+  max-width: 960px;
+  margin: 0 auto;
+}
+.profile-form {
+  padding-bottom: 24px;
+  border-bottom: 1px solid var(--border);
+}
+.name-fields {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin: 0 0 20px;
+}
+.name-fields label {
+  display: grid;
+  gap: 8px;
+  font-size: 0.875rem;
+  font-weight: 550;
+}
+.name-fields input {
+  min-width: 0;
+  width: 100%;
+  padding: 11px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--ink);
+  font: inherit;
+  background: var(--surface);
+}
+.name-fields input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.verification-badge {
+  display: inline-block;
+  margin-top: 0;
+  padding: 3px 8px;
+  border-radius: 5px;
+  color: #694714;
+  background: #fff5e8;
+  font-size: 0.75rem;
+}
+.verification-badge.verified {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+.email-address {
+  overflow-wrap: anywhere;
+  min-width: 0;
+  color: var(--ink);
+  font-weight: 550;
+  font-size: 1rem;
+}
+.email-identity {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+.profile-message {
+  padding: 16px 0;
+  color: var(--muted);
+}
+.account-heading {
+  margin: 0 0 24px;
+}
+.account-heading h1 {
+  font-family: Manrope, sans-serif;
+  font-size: 2rem;
+  letter-spacing: -0.05em;
+  margin: 0;
+}
+.account-layout {
+  display: grid;
+  grid-template-columns: 160px minmax(0, 1fr);
+  gap: 28px;
+  align-items: start;
+}
+nav {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+nav button {
+  padding: 12px 16px;
+  border: 0;
+  border-radius: 8px;
+  text-align: left;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  cursor: pointer;
+}
+nav button.selected {
+  color: var(--accent);
+  background: var(--accent-soft);
+  box-shadow: inset 3px 0 var(--accent);
+  font-weight: 650;
+}
+.settings-panel {
+  padding: 8px 24px;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface);
+}
+.profile-preview {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 24px 0;
+}
+.profile-avatar {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: white;
+  font-weight: 650;
+}
+.field-label {
+  color: var(--muted);
+  font-size: 0.8rem;
+  margin: 0 0 6px;
+}
+.profile-preview h2 {
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.setting-row,
+.deletion-section {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 24px 0;
+}
+.deletion-section {
+  display: block;
+  border-top: 1px solid var(--border);
+}
+h3 {
+  font-size: 0.95rem;
+  font-weight: 650;
+  margin: 0;
+}
+.setting-row p,
+.deletion-section p,
+.signed-out p {
+  font-size: 0.875rem;
+  color: var(--muted);
+  line-height: 1.6;
+  margin: 6px 0 0;
+}
+.setting-row .button {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+.delete-button {
+  padding: 0;
+  margin-top: 12px;
+  border: 0;
+  background: none;
+  color: var(--danger);
+  font: inherit;
+  font-size: 0.875rem;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.preview-notice {
+  background: var(--accent-soft);
+  padding: 12px 16px;
+  border-radius: 8px;
+  color: var(--accent);
+  font-size: 0.875rem;
+  line-height: 1.6;
+  margin: 0 0 16px;
+}
+.signed-out {
+  padding: 24px;
+}
+.signed-out .button {
+  margin-top: 20px;
+}
+button:focus-visible {
+  outline: 3px solid #6b9888;
+  outline-offset: 3px;
+}
+@media (max-width: 520px) {
+  .name-fields {
+    grid-template-columns: 1fr;
+  }
+  .account-layout {
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+  .setting-row {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 16px;
+  }
+  .settings-panel {
+    padding: 4px 20px;
+  }
+  nav {
+    flex-direction: row;
+  }
+  nav button {
+    flex: 1;
+    text-align: center;
+  }
+}
