@@ -1,53 +1,7 @@
 import { Component, inject } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { AuthService } from '../core/auth/auth.service';
-@Component({
-  imports: [RouterLink],
-  template: ` <div class="narrow-page">
-    <p class="eyebrow">Account</p>
-    <h1>{{ auth.authenticated() ? 'Hello, ' + auth.displayName() : 'Your voice belongs here' }}</h1>
-    <p class="lede">
-      {{
-        auth.authenticated()
-          ? 'Manage your account and the polls you create.'
-          : 'Sign in to create polls and take part in the conversation.'
-      }}
-    </p>
-    <section class="panel form-section account-panel">
-      @if (auth.authenticated()) {
-        <h2>Your account</h2>
-        <p class="hint">
-          Profile details, password and security settings are managed through your account provider.
-        </p>
-        <div class="stack">
-          <button class="button primary" [disabled]="auth.busy()" (click)="auth.manageAccount()">
-            Manage account</button
-          ><a class="button" routerLink="/my-polls">View my polls</a
-          ><button class="text-button" [disabled]="auth.busy()" (click)="auth.signOut()">
-            Sign out
-          </button>
-        </div>
-      } @else {
-        <h2>Welcome to Votivo</h2>
-        <p class="hint">You’ll continue to our sign-in page and return here when you’re done.</p>
-        <div class="stack">
-          <button class="button primary" [disabled]="!auth.canSignIn()" (click)="auth.signIn()">
-            Sign in</button
-          ><button class="button" [disabled]="!auth.canRegister()" (click)="auth.register()">
-            Create an account
-          </button>
-        </div>
-        @if (!auth.registrationEnabled()) {
-          <p class="hint">Registration is not available in this environment.</p>
-        }
-      }
-    </section>
-    <a class="back-link" routerLink="/polls">Back to Explore</a>
-  </div>`,
-})
-export class AccountPage {
-  readonly auth = inject(AuthService);
-}
+export { AccountPage } from './account/account-page';
 @Component({
   imports: [RouterLink],
   template: ` <div class="narrow-page">

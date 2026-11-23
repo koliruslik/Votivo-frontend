@@ -21,6 +21,7 @@ export class AuthService {
   private readonly currentMessage = signal<string | null>(null);
   private readonly actionPending = signal(false);
   private readonly registrationAllowed = signal(false);
+  readonly passwordChangeMessage = signal<string | null>(null);
   private readonly subject = signal('');
   private readonly admin = signal(false);
   private client?: Keycloak;
@@ -67,10 +68,6 @@ export class AuthService {
     return response;
   }
 
-  async manageAccount(): Promise<void> {
-    if (this.authenticated()) await this.perform((client) => client.accountManagement());
-  }
-
   initialize(): Promise<void> {
     this.initialization ??= this.initializeClient();
     return this.initialization;
@@ -90,6 +87,17 @@ export class AuthService {
     if (this.canRegister()) {
       await this.perform((client) => client.register({ redirectUri: this.returnUri() }));
     }
+  }
+
+  async changePassword(): Promise<void> {
+    if (!this.authenticated() || this.busy()) return;
+    this.passwordChangeMessage.set(null);
+    await this.perform((client) =>
+      client.login({
+        action: 'UPDATE_PASSWORD',
+        redirectUri: `${window.location.origin}/account?section=security`,
+      }),
+    );
   }
 
   async signOut(): Promise<void> {
@@ -115,6 +123,16 @@ export class AuthService {
         clientId: config.clientId,
       });
       this.client = client;
+      client.onActionUpdate = (status, action) => {
+        if (action !== 'UPDATE_PASSWORD') return;
+        this.passwordChangeMessage.set(
+          status === 'success'
+            ? 'Your password has been changed.'
+            : status === 'cancelled'
+              ? 'Password change cancelled.'
+              : 'Password change could not be completed. Please try again.',
+        );
+      };
       client.onAuthSuccess = () => this.updateSession(client);
       client.onAuthRefreshSuccess = () => this.updateSession(client);
       client.onAuthLogout = () => this.clearSession();
@@ -136,6 +154,7 @@ export class AuthService {
       this.updateSession(client);
     } catch {
       if (this.client) {
+        this.client.onActionUpdate = undefined;
         this.client.onAuthSuccess = undefined;
         this.client.onAuthRefreshSuccess = undefined;
         this.client.onAuthLogout = undefined;
