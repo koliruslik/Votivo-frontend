@@ -36,11 +36,6 @@
         (click)="menuOpen.set(false)"
         >Explore</a
       >
-      @if (auth.authenticated()) {
-        <a routerLink="/my-polls" routerLinkActive="nav-active" (click)="menuOpen.set(false)"
-          >My polls</a
-        >
-      }
       @if (auth.isAdmin()) {
         <a routerLink="/admin" routerLinkActive="nav-active" (click)="menuOpen.set(false)"
           >Moderation</a
@@ -50,19 +45,27 @@
     </nav>
     <nav class="account-nav" aria-label="Account" [attr.aria-busy]="auth.busy()">
       @if (auth.authenticated()) {
-        <a class="account-link" routerLink="/account"
-          ><span class="avatar" aria-hidden="true">{{
-            auth.displayName().slice(0, 1).toUpperCase()
-          }}</span
-          ><span>{{ auth.displayName() }}</span></a
-        ><button class="text-button" [disabled]="auth.busy()" (click)="auth.signOut()">
-          Sign out
-        </button>
+        <details class="account-menu" #accountMenu>
+          <summary
+            class="account-link"
+            [attr.aria-label]="'Account options for ' + auth.displayName()"
+          >
+            <span class="account-name">{{ auth.displayName() }}</span>
+            <span class="avatar" aria-hidden="true">{{ auth.initials() }}</span>
+          </summary>
+          <div class="account-dropdown">
+            <a routerLink="/account" (click)="accountMenu.open = false">My account</a>
+            <a routerLink="/my-polls" (click)="accountMenu.open = false">My polls</a>
+            <button [disabled]="auth.busy()" (click)="accountMenu.open = false; auth.signOut()">
+              Sign out
+            </button>
+          </div>
+        </details>
       } @else {
-        <button class="text-button" [disabled]="!auth.canSignIn()" (click)="auth.signIn()">
+        <button class="button primary" [disabled]="!auth.canSignIn()" (click)="auth.signIn()">
           Sign in</button
         ><button
-          class="button primary"
+          class="text-button"
           [disabled]="!auth.canRegister()"
           [attr.aria-describedby]="auth.registrationEnabled() ? null : 'registration-note'"
           (click)="auth.register()"
