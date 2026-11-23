@@ -26,6 +26,7 @@ export class AuthService {
   private client?: Keycloak;
   private rejectedSession = false;
   private initialization?: Promise<void>;
+  private refreshPending?: Promise<void>;
 
   readonly status = this.currentStatus.asReadonly();
   readonly displayName = this.currentUser.asReadonly();
@@ -48,7 +49,12 @@ export class AuthService {
     if (!this.authenticated() || !this.client.token) throw new SessionExpiredError();
     const headers = new Headers(init.headers);
     headers.set('Authorization', `Bearer ${this.client.token}`);
-    return this.client.fetch(url, { ...init, headers });
+    const response = await this.client.fetch(url, { ...init, headers });
+    if (response.status === 401) {
+      this.expireSession(this.client);
+      throw new SessionExpiredError();
+    }
+    return response;
   }
 
   async manageAccount(): Promise<void> {
@@ -160,19 +166,31 @@ export class AuthService {
     this.admin.set(false);
   }
 
-  private async refreshSession(client: Keycloak): Promise<void> {
+  private refreshSession(client: Keycloak): Promise<void> {
+    if (this.rejectedSession) return Promise.resolve();
+    this.refreshPending ??= this.performRefresh(client).finally(() => {
+      this.refreshPending = undefined;
+    });
+    return this.refreshPending;
+  }
+
+  private async performRefresh(client: Keycloak): Promise<void> {
     try {
       await this.withIdentityDeadline(client.updateToken(30));
       this.updateSession(client);
     } catch {
-      this.rejectedSession = true;
-      client.onAuthSuccess = undefined;
-      client.onAuthRefreshSuccess = undefined;
-      client.onTokenExpired = undefined;
-      void client.clearToken().catch(() => undefined);
-      this.clearSession();
-      this.currentMessage.set('Your session expired. Please sign in again.');
+      this.expireSession(client);
     }
+  }
+
+  private expireSession(client: Keycloak): void {
+    this.rejectedSession = true;
+    client.onAuthSuccess = undefined;
+    client.onAuthRefreshSuccess = undefined;
+    client.onTokenExpired = undefined;
+    void client.clearToken().catch(() => undefined);
+    this.clearSession();
+    this.currentMessage.set('Your session expired. Please sign in again.');
   }
 
   private async withIdentityDeadline<T>(operation: Promise<T>): Promise<T> {
