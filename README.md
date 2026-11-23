@@ -19,7 +19,7 @@ npm.cmd start
 
 Open `http://localhost:4200`. Angular proxies `/api` to the Node server on port 4300. The server defaults to Poll on 18082, Vote on 18083 and Result on 18084. Override its settings using environment variables; `.env.example` lists them. To load that file explicitly, use `node --env-file=.env server/index.mjs` after making a local `.env` copy.
 
-Sign-in, registration and profile/security settings use Keycloak's hosted pages. Browser settings are in [public/auth-config.json](public/auth-config.json). The frontend client needs an access-token audience mapper for `poll-service`; see [Keycloak setup](docs/keycloak.md).
+Sign-in and registration use Keycloak's hosted pages. The local account page shows the signed-in identity and links to the user's polls; it does not open the disabled Keycloak Account Console. Browser settings are in [public/auth-config.json](public/auth-config.json). The frontend client needs an access-token audience mapper for `poll-service`; see [Keycloak setup](docs/keycloak.md).
 
 ## Interface
 

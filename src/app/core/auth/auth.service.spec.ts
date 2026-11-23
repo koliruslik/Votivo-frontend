@@ -20,6 +20,17 @@ const config = {
 };
 
 function makeClient() {
+  const profile = {
+    id: '123e4567-e89b-42d3-a456-426614174000',
+    email: 'service@example.test',
+    firstName: 'Service',
+    lastName: 'User',
+    emailVerified: true,
+    enabled: true,
+    roles: ['user'],
+    createdAt: '2026-01-01T00:00:00Z',
+    updatedAt: '2026-01-02T00:00:00Z',
+  };
   return {
     authenticated: false,
     idTokenParsed: undefined as Record<string, string> | undefined,
@@ -30,11 +41,19 @@ function makeClient() {
     clearToken: vi.fn().mockResolvedValue(undefined),
     updateToken: vi.fn().mockResolvedValue(true),
     token: 'test-access-token',
-    fetch: vi.fn().mockImplementation(() => Promise.resolve(new Response('{}'))),
+    fetch: vi.fn().mockImplementation((input: URL | RequestInfo) => {
+      const url = new URL(input instanceof Request ? input.url : input.toString());
+      if (url.pathname === '/api/v1/users/me/header')
+        return Promise.resolve(new Response(JSON.stringify({ firstName: 'Service', lastName: 'User' })));
+      if (url.pathname === '/api/v1/users/me')
+        return Promise.resolve(new Response(JSON.stringify(profile)));
+      return Promise.resolve(new Response('{}'));
+    }),
     onAuthSuccess: undefined as (() => void) | undefined,
     onAuthRefreshSuccess: undefined as (() => void) | undefined,
     onAuthLogout: undefined as (() => void) | undefined,
     onTokenExpired: undefined as (() => void) | undefined,
+    onActionUpdate: undefined as ((status: string, action: string) => void) | undefined,
   };
 }
 
@@ -73,6 +92,8 @@ describe('Keycloak account shell', () => {
     expect(auth.initialize()).toBe(first);
     http.expectOne('/auth-config.json').flush({ ...config, ...overrides });
     await first;
+    client.fetch.mockClear();
+    client.updateToken.mockClear();
   }
 
   it('loads runtime settings and starts public SSO with PKCE and strict DPoP', async () => {
@@ -174,16 +195,112 @@ describe('Keycloak account shell', () => {
 
   it('shows the authenticated account and delegates logout to Keycloak', async () => {
     client.authenticated = true;
-    client.idTokenParsed = { name: 'Test user', preferred_username: 'tester' };
+    client.idTokenParsed = { name: 'Keycloak claim name', preferred_username: 'tester' };
     await initialize();
     const fixture = TestBed.createComponent(App);
     fixture.detectChanges();
-    expect(fixture.nativeElement.textContent).toContain('Test user');
+    expect(fixture.nativeElement.textContent).toContain('Service User');
     const button = fixture.nativeElement.querySelector('nav button') as HTMLButtonElement;
     expect(button.textContent).toContain('Sign out');
     button.click();
     await fixture.whenStable();
     expect(client.logout).toHaveBeenCalledWith({ redirectUri: window.location.origin });
+  });
+
+  it('loads the account name from the User Service header during initialization', async () => {
+    client.authenticated = true;
+    client.idTokenParsed = { name: 'Keycloak claim name' };
+    await initialize();
+
+    expect(auth.displayName()).toBe('Service User');
+    expect(client.fetch).not.toHaveBeenCalled();
+  });
+
+  it('uses a generic account label when the User Service header is unavailable', async () => {
+    client.authenticated = true;
+    client.idTokenParsed = { name: 'Private claim name' };
+    client.fetch.mockRejectedValue(new Error('User Service unavailable'));
+    await initialize();
+
+    expect(auth.authenticated()).toBe(true);
+    expect(auth.displayName()).toBe('Account');
+    expect(auth.profile()).toBeNull();
+  });
+
+  it('loads and saves profile names through the User Service', async () => {
+    client.authenticated = true;
+    await initialize();
+    const profileResponse = (firstName: string, lastName: string) => ({
+      id: '123e4567-e89b-42d3-a456-426614174000',
+      email: 'service@example.test',
+      firstName,
+      lastName,
+      emailVerified: true,
+      enabled: true,
+      roles: ['user'],
+      createdAt: '2026-01-01T00:00:00Z',
+      updatedAt: '2026-01-02T00:00:00Z',
+    });
+    let patchBody: unknown;
+    client.fetch.mockImplementation((input: URL | RequestInfo, init?: RequestInit) => {
+      const url = new URL(input instanceof Request ? input.url : input.toString());
+      if (url.pathname === '/api/v1/users/me' && init?.method === 'PATCH') {
+        patchBody = JSON.parse(String(init.body));
+        return Promise.resolve(new Response(JSON.stringify(profileResponse('Ada', 'Lovelace'))));
+      }
+      return Promise.resolve(new Response(JSON.stringify(profileResponse('Service', 'User'))));
+    });
+
+    await auth.loadProfile();
+    expect(auth.profile()).toMatchObject({ firstName: 'Service', lastName: 'User' });
+    await auth.saveProfile('Ada', 'Lovelace');
+
+    expect(patchBody).toEqual({ firstName: 'Ada', lastName: 'Lovelace' });
+    expect(auth.profile()).toMatchObject({ firstName: 'Ada', lastName: 'Lovelace' });
+    expect(auth.displayName()).toBe('Ada Lovelace');
+  });
+
+  it('starts a password change for an authenticated account', async () => {
+    client.authenticated = true;
+    await initialize();
+
+    await auth.changePassword();
+
+    expect(client.login).toHaveBeenCalledWith({
+      action: 'UPDATE_PASSWORD',
+      redirectUri: window.location.origin + '/account?section=security',
+    });
+  });
+
+  it('does nothing when a guest requests a password change', async () => {
+    await initialize();
+
+    await auth.changePassword();
+
+    expect(client.login).not.toHaveBeenCalled();
+  });
+
+  it('starts an email change action and returns to profile settings', async () => {
+    client.authenticated = true;
+    await initialize();
+
+    await auth.changeEmail();
+
+    expect(client.login).toHaveBeenCalledWith({
+      action: 'UPDATE_EMAIL',
+      redirectUri: window.location.origin + '/account?section=profile',
+    });
+  });
+
+  it.each([
+    ['success', 'Your password has been changed.'],
+    ['cancelled', 'Password change cancelled.'],
+  ])('reports an UPDATE_PASSWORD %s action', async (status, expectedMessage) => {
+    await initialize();
+
+    client.onActionUpdate?.(status, 'UPDATE_PASSWORD');
+
+    expect(auth.passwordChangeMessage()).toBe(expectedMessage);
   });
 
   it('clears the displayed session if token refresh fails', async () => {
@@ -195,21 +312,6 @@ describe('Keycloak account shell', () => {
     expect(auth.displayName()).toBe('');
     expect(client.clearToken).toHaveBeenCalled();
     expect(auth.message()).toContain('session expired');
-  });
-  it('does not keep an API call pending indefinitely while token refresh hangs', async () => {
-    client.authenticated = true;
-    await initialize();
-    vi.useFakeTimers();
-    try {
-      client.updateToken.mockImplementation(() => new Promise(() => {}));
-      const outcome = auth.request('/api/v1/polls/mine', {}).catch((error) => error);
-      await vi.advanceTimersByTimeAsync(8001);
-      expect(await outcome).toBeInstanceOf(SessionExpiredError);
-      expect(auth.authenticated()).toBe(false);
-      expect(client.fetch).not.toHaveBeenCalled();
-    } finally {
-      vi.useRealTimers();
-    }
   });
 
   it('shares a failed refresh across concurrent requests and ignores late auth callbacks', async () => {
@@ -240,7 +342,6 @@ describe('Keycloak account shell', () => {
     expect(auth.displayName()).toBe('');
   });
 
-
   it('retains the authenticated session when an API call returns 403', async () => {
     client.authenticated = true;
     await initialize();
@@ -254,6 +355,21 @@ describe('Keycloak account shell', () => {
     expect(client.clearToken).not.toHaveBeenCalled();
   });
 
+  it('does not keep an API call pending indefinitely while token refresh hangs', async () => {
+    client.authenticated = true;
+    await initialize();
+    vi.useFakeTimers();
+    try {
+      client.updateToken.mockImplementation(() => new Promise(() => {}));
+      const outcome = auth.request('/api/v1/polls/mine', {}).catch((error) => error);
+      await vi.advanceTimersByTimeAsync(8001);
+      expect(await outcome).toBeInstanceOf(SessionExpiredError);
+      expect(auth.authenticated()).toBe(false);
+      expect(client.fetch).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 
   it('shares refresh across concurrent API calls and sends the refreshed token', async () => {
     client.authenticated = true;
@@ -276,7 +392,6 @@ describe('Keycloak account shell', () => {
     }
   });
 
-
   it('ends a rejected session without replaying a modifying request', async () => {
     client.authenticated = true;
     await initialize();
@@ -288,7 +403,6 @@ describe('Keycloak account shell', () => {
     expect(auth.status()).toBe('anonymous');
     expect(auth.message()).toContain('session expired');
   });
-
 
   it('reports redirect errors and allows a subsequent sign-in attempt', async () => {
     await initialize();

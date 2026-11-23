@@ -26,11 +26,21 @@ export function createApp(options = {}) {
       jwksUrl: process.env['KEYCLOAK_JWKS_URL'] ?? `${issuer}/protocol/openid-connect/certs`,
     });
   const targets = options.targets ?? {
+    user: process.env['USER_URL'] ?? 'http://localhost:18081',
     poll: process.env['POLL_URL'] ?? 'http://localhost:18082',
     vote: process.env['VOTE_URL'] ?? 'http://localhost:18083',
     result: process.env['RESULT_URL'] ?? 'http://localhost:18084',
   };
   const root = resolve(options.root ?? 'dist/votivo-frontend/browser');
+  const authenticateUser =
+    options.authenticateUser ??
+    options.authenticate ??
+    createAuthenticator({
+      issuer,
+      requireDpop: process.env['REQUIRE_DPOP'] !== 'false',
+      audience: 'user-service',
+      jwksUrl: process.env['KEYCLOAK_JWKS_URL'] ?? `${issuer}/protocol/openid-connect/certs`,
+    });
   const send = (res, status, message) => {
     res.writeHead(status, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
     res.end(JSON.stringify({ message }));
@@ -78,6 +88,56 @@ export function createApp(options = {}) {
       }
       res.setHeader('Cache-Control', 'no-store');
       const path = url.pathname;
+      const userRoute = path === '/api/v1/users/me' || path === '/api/v1/users/me/header';
+      if (userRoute) {
+        if (!(path.endsWith('/header') ? ['GET'] : ['GET', 'PATCH']).includes(req.method))
+          return send(res, 405, 'Method not allowed');
+        if (req.headers.origin && req.headers.origin !== origin)
+          return send(res, 403, 'Origin rejected');
+        if (!req.headers.authorization) return send(res, 401, 'Sign in required');
+        try {
+          await authenticateUser(req.headers.authorization, req.headers.dpop, req.method, url.href);
+        } catch {
+          return send(res, 401, 'Invalid or expired session');
+        }
+        const headers = {
+          Accept: 'application/json',
+          Authorization: req.headers.authorization,
+          'X-Forwarded-Proto': new URL(origin).protocol.slice(0, -1),
+          'X-Forwarded-Host': new URL(origin).host,
+          ...(req.headers.dpop ? { DPoP: req.headers.dpop } : {}),
+        };
+        let body;
+        if (req.method === 'PATCH') {
+          if (req.headers['content-type']?.split(';')[0] !== 'application/json')
+            return send(res, 415, 'JSON required');
+          const chunks = [];
+          let size = 0;
+          for await (const chunk of req) {
+            size += chunk.length;
+            if (size > 16384) return send(res, 413, 'Body too large');
+            chunks.push(chunk);
+          }
+          body = Buffer.concat(chunks);
+          headers['Content-Type'] = 'application/json';
+        }
+        const response = await fetch(
+          new URL(path, targets.user ?? process.env['USER_URL'] ?? 'http://localhost:18081'),
+          {
+            method: req.method,
+            headers,
+            body,
+            redirect: 'manual',
+            signal: AbortSignal.timeout(12000),
+          },
+        );
+        if (response.status >= 300 && response.status < 400)
+          return send(res, 502, 'Unexpected service redirect');
+        res.writeHead(response.status, {
+          'Content-Type': response.headers.get('Content-Type') ?? 'application/json',
+        });
+        return res.end(Buffer.from(await response.arrayBuffer()));
+      }
       const id = '[0-9a-fA-F-]{36}';
       const vote = new RegExp(`^/api/v1/polls/(${id})/vote$`).exec(path);
       const result = new RegExp(`^/api/v1/polls/(${id})/results$`).exec(path);

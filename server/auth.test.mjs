@@ -34,10 +34,10 @@ async function token(extra = {}, settings = {}) {
     .setExpirationTime(settings.exp ?? '5m')
     .sign(accessKey.privateKey);
 }
-async function dpop(accessToken, key, extra = {}) {
+async function dpop(accessToken, key, extra = {}, method = 'POST', targetPath = path) {
   return new SignJWT({
-    htm: 'POST',
-    htu: origin + path,
+    htm: method,
+    htu: origin + targetPath,
     ath: createHash('sha256').update(accessToken).digest('base64url'),
     jti: randomUUID(),
     ...extra,
@@ -283,6 +283,81 @@ test('gateway rejects forged identity, protects private results, and forwards on
     403,
   );
   assert.equal((await fetch(gateway + '/api/arbitrary')).status, 404);
+});
+
+test('gateway authenticates User Service requests and forwards the original DPoP identity safely', async (t) => {
+  const headerPath = '/api/v1/users/me/header';
+  const profilePath = '/api/v1/users/me';
+  let forwarded;
+  let forwardedBody;
+  const backend = (await import('node:http')).createServer(async (req, res) => {
+    const chunks = [];
+    for await (const chunk of req) chunks.push(chunk);
+    forwardedBody = Buffer.concat(chunks).toString();
+    forwarded = {
+      method: req.method,
+      url: req.url,
+      authorization: req.headers.authorization,
+      dpop: req.headers.dpop,
+      proto: req.headers['x-forwarded-proto'],
+      host: req.headers['x-forwarded-host'],
+    };
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ firstName: 'Ada', lastName: 'Lovelace' }));
+  });
+  const target = await listen(backend);
+  const authenticateUser = createAuthenticator({ issuer, audience: 'user-service', keySet, requireDpop: false });
+  const app = createApp({
+    origin,
+    authenticate: makeAuth(),
+    authenticateUser,
+    targets: { user: target, poll: target, vote: target, result: target },
+  });
+  const gateway = await listen(app);
+  t.after(() => {
+    backend.closeAllConnections();
+    app.closeAllConnections();
+    backend.close();
+    app.close();
+  });
+
+  assert.equal((await fetch(gateway + headerPath)).status, 401);
+  assert.equal((await fetch(gateway + headerPath, {
+    headers: { Authorization: `Bearer ${await token()}` },
+  })).status, 401, 'poll-service audience is not accepted for User Service routes');
+  assert.equal((await fetch(gateway + headerPath, { method: 'POST' })).status, 405);
+
+  const key = await generateKeyPair('ES256');
+  const userToken = await token({
+    cnf: { jkt: await calculateJwkThumbprint(await exportJWK(key.publicKey)) },
+  }, { audience: 'user-service' });
+  const headerProof = await dpop(userToken, key, {}, 'GET', headerPath);
+  const headerResponse = await fetch(gateway + headerPath, {
+    headers: { Authorization: `DPoP ${userToken}`, DPoP: headerProof, Origin: origin },
+  });
+  assert.equal(headerResponse.status, 200);
+  assert.deepEqual(await headerResponse.json(), { firstName: 'Ada', lastName: 'Lovelace' });
+  assert.deepEqual(forwarded, {
+    method: 'GET', url: headerPath, authorization: `DPoP ${userToken}`,
+    dpop: headerProof, proto: 'https', host: 'votivo.test',
+  });
+
+  const patchProof = await dpop(userToken, key, {}, 'PATCH', profilePath);
+  const patchBody = JSON.stringify({ firstName: 'Ada', lastName: 'Lovelace' });
+  const patchResponse = await fetch(gateway + profilePath, {
+    method: 'PATCH',
+    headers: {
+      Authorization: `DPoP ${userToken}`, DPoP: patchProof, Origin: origin,
+      'Content-Type': 'application/json',
+    },
+    body: patchBody,
+  });
+  assert.equal(patchResponse.status, 200);
+  assert.equal(forwardedBody, patchBody);
+  assert.equal(forwarded.method, 'PATCH');
+  assert.equal(forwarded.url, profilePath);
+  assert.equal(forwarded.authorization, `DPoP ${userToken}`);
+  assert.equal(forwarded.dpop, patchProof);
 });
 
 test('serves the silent SSO callback to same-origin frames while protecting other pages', async (t) => {

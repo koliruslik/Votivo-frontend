@@ -6,6 +6,17 @@ import { AuthConfig, parseAuthConfig } from './auth-config';
 import { KEYCLOAK_FACTORY } from './keycloak-client';
 
 export type AuthStatus = 'loading' | 'disabled' | 'unavailable' | 'anonymous' | 'authenticated';
+export interface UserProfile {
+  id: string;
+  firstName: string | null;
+  lastName: string | null;
+  email: string | null;
+  emailVerified: boolean;
+  enabled: boolean;
+  roles: string[];
+  createdAt: string | null;
+  updatedAt: string;
+}
 export class SessionExpiredError extends Error {
   constructor() {
     super('Your session expired. Please sign in again.');
@@ -22,6 +33,11 @@ export class AuthService {
   private readonly actionPending = signal(false);
   private readonly registrationAllowed = signal(false);
   readonly passwordChangeMessage = signal<string | null>(null);
+  readonly emailChangeMessage = signal<string | null>(null);
+  readonly profile = signal<UserProfile | null>(null);
+  readonly profileLoading = signal(false);
+  readonly profileError = signal<string | null>(null);
+  private sessionVersion = 0;
   private readonly subject = signal('');
   private readonly admin = signal(false);
   private client?: Keycloak;
@@ -100,6 +116,94 @@ export class AuthService {
     );
   }
 
+  async changeEmail(): Promise<void> {
+    if (!this.authenticated() || this.busy()) return;
+    this.emailChangeMessage.set(null);
+    await this.perform((client) =>
+      client.login({
+        action: 'UPDATE_EMAIL',
+        redirectUri: `${window.location.origin}/account?section=profile`,
+      }),
+    );
+  }
+
+  private applyName(value: { firstName: string | null; lastName: string | null }): void {
+    if (
+      ![value.firstName, value.lastName].every((name) => name === null || typeof name === 'string')
+    )
+      throw new Error('Invalid profile response');
+    this.currentUser.set(
+      [value.firstName, value.lastName].filter(Boolean).join(' ').trim() || 'Account',
+    );
+  }
+
+  async refreshHeader(): Promise<void> {
+    const version = this.sessionVersion;
+    try {
+      const response = await this.request('/api/v1/users/me/header', {
+        method: 'GET',
+        signal: AbortSignal.timeout(12000),
+      });
+      if (!response.ok) throw new Error('Profile unavailable');
+      const header = await response.json();
+      if (this.authenticated() && version === this.sessionVersion) this.applyName(header);
+    } catch {
+      /* Identity stays generic; never substitute stale token profile claims. */
+    }
+  }
+
+  async loadProfile(): Promise<void> {
+    if (!this.authenticated() || this.profileLoading()) return;
+    const version = this.sessionVersion;
+    this.profileLoading.set(true);
+    this.profileError.set(null);
+    try {
+      const response = await this.request('/api/v1/users/me', {
+        method: 'GET',
+        signal: AbortSignal.timeout(12000),
+      });
+      if (!response.ok) throw new Error();
+      const profile = await response.json();
+      if (this.authenticated() && version === this.sessionVersion) this.applyProfile(profile);
+    } catch {
+      if (version === this.sessionVersion)
+        this.profileError.set('Cannot load your profile. Please try again.');
+    } finally {
+      if (version === this.sessionVersion) this.profileLoading.set(false);
+    }
+  }
+
+  async saveProfile(firstName: string, lastName: string): Promise<void> {
+    if (!this.authenticated()) throw new SessionExpiredError();
+    const version = this.sessionVersion;
+    const response = await this.request('/api/v1/users/me', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ firstName, lastName }),
+      signal: AbortSignal.timeout(12000),
+    });
+    if (!response.ok)
+      throw new Error(
+        response.status === 400
+          ? 'Check your first and last name.'
+          : 'Could not save your profile. Please try again.',
+      );
+    const profile = await response.json();
+    if (!this.authenticated() || version !== this.sessionVersion) throw new SessionExpiredError();
+    this.applyProfile(profile);
+  }
+
+  private applyProfile(profile: UserProfile): void {
+    if (
+      typeof profile.id !== 'string' ||
+      typeof profile.emailVerified !== 'boolean' ||
+      !(profile.email === null || typeof profile.email === 'string')
+    )
+      throw new Error('Invalid profile response');
+    this.applyName(profile);
+    this.profile.set(profile);
+  }
+
   async signOut(): Promise<void> {
     if (this.authenticated() && !this.busy()) {
       await this.perform((client) => client.logout({ redirectUri: window.location.origin }));
@@ -124,6 +228,16 @@ export class AuthService {
       });
       this.client = client;
       client.onActionUpdate = (status, action) => {
+        if (action === 'UPDATE_EMAIL') {
+          this.emailChangeMessage.set(
+            status === 'success'
+              ? 'Email update completed. Refresh your profile if the change is not visible yet.'
+              : status === 'cancelled'
+                ? 'Email change cancelled.'
+                : 'Email change could not be completed. Please try again.',
+          );
+          return;
+        }
         if (action !== 'UPDATE_PASSWORD') return;
         this.passwordChangeMessage.set(
           status === 'success'
@@ -152,6 +266,7 @@ export class AuthService {
       });
       await this.withIdentityDeadline(initialization);
       this.updateSession(client);
+      if (this.authenticated()) await this.refreshHeader();
     } catch {
       if (this.client) {
         this.client.onActionUpdate = undefined;
@@ -180,8 +295,7 @@ export class AuthService {
       this.clearSession();
       return;
     }
-    const claims = client.idTokenParsed ?? client.tokenParsed;
-    this.currentUser.set(claims?.['name'] ?? claims?.['preferred_username'] ?? 'Account');
+    if (!this.currentUser()) this.currentUser.set('Account');
     this.subject.set(client.tokenParsed?.sub ?? '');
     this.admin.set(client.hasRealmRole?.('admin') ?? false);
     this.currentMessage.set(null);
@@ -189,6 +303,10 @@ export class AuthService {
   }
 
   private clearSession(): void {
+    this.sessionVersion++;
+    this.profile.set(null);
+    this.profileLoading.set(false);
+    this.profileError.set(null);
     this.currentUser.set('');
     this.currentStatus.set('anonymous');
     this.subject.set('');
