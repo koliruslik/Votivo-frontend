@@ -30,6 +30,16 @@ export class AuthService {
 
   readonly status = this.currentStatus.asReadonly();
   readonly displayName = this.currentUser.asReadonly();
+  readonly initials = computed(() =>
+    this.displayName()
+      .trim()
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((part) => Array.from(part)[0])
+      .join('')
+      .toLocaleUpperCase(),
+  );
   readonly message = this.currentMessage.asReadonly();
   readonly busy = this.actionPending.asReadonly();
   readonly authenticated = computed(() => this.status() === 'authenticated');
