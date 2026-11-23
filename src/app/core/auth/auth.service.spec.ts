@@ -212,6 +212,84 @@ describe('Keycloak account shell', () => {
     }
   });
 
+  it('shares a failed refresh across concurrent requests and ignores late auth callbacks', async () => {
+    client.authenticated = true;
+    await initialize();
+    let failRefresh!: (error: Error) => void;
+    client.updateToken.mockImplementation(() => new Promise<boolean>((_resolve, reject) => {
+      failRefresh = reject;
+    }));
+    const first = auth.request('/api/v1/polls/mine', { method: 'GET' }).catch((error) => error);
+    const second = auth.request('/api/v1/polls', { method: 'GET' }).catch((error) => error);
+
+    expect(client.updateToken).toHaveBeenCalledTimes(1);
+    failRefresh(new Error('Expired'));
+    const outcomes = await Promise.all([first, second]);
+
+    expect(outcomes.every((error) => error instanceof SessionExpiredError)).toBe(true);
+    expect(client.fetch).not.toHaveBeenCalled();
+    expect(client.clearToken).toHaveBeenCalledTimes(1);
+    expect(auth.status()).toBe('anonymous');
+    expect(auth.userId()).toBe('');
+
+    client.authenticated = true;
+    client.idTokenParsed = { name: 'Late user' };
+    client.onAuthSuccess?.();
+    client.onAuthRefreshSuccess?.();
+    expect(auth.status()).toBe('anonymous');
+    expect(auth.displayName()).toBe('');
+  });
+
+
+  it('retains the authenticated session when an API call returns 403', async () => {
+    client.authenticated = true;
+    await initialize();
+    client.fetch.mockResolvedValue(new Response('{}', { status: 403 }));
+
+    const response = await auth.request('/api/v1/polls/mine', { method: 'GET' });
+
+    expect(response.status).toBe(403);
+    expect(auth.authenticated()).toBe(true);
+    expect(auth.status()).toBe('authenticated');
+    expect(client.clearToken).not.toHaveBeenCalled();
+  });
+
+
+  it('shares refresh across concurrent API calls and sends the refreshed token', async () => {
+    client.authenticated = true;
+    await initialize();
+    let finishRefresh!: (value: boolean) => void;
+    client.updateToken.mockImplementation(() => new Promise<boolean>((resolve) => {
+      finishRefresh = resolve;
+    }));
+    const first = auth.request('/api/v1/polls/mine', { method: 'GET' });
+    const second = auth.request('/api/v1/polls', { method: 'GET' });
+    expect(client.updateToken).toHaveBeenCalledTimes(1);
+    expect(client.updateToken).toHaveBeenCalledWith(30);
+    expect(client.fetch).not.toHaveBeenCalled();
+    client.token = 'refreshed-access-token';
+    finishRefresh(true);
+    await Promise.all([first, second]);
+    expect(client.fetch).toHaveBeenCalledTimes(2);
+    for (const [, options] of client.fetch.mock.calls) {
+      expect(options.headers.get('Authorization')).toBe('Bearer refreshed-access-token');
+    }
+  });
+
+
+  it('ends a rejected session without replaying a modifying request', async () => {
+    client.authenticated = true;
+    await initialize();
+    client.fetch.mockResolvedValue(new Response('{}', { status: 401 }));
+    await expect(auth.request('/api/v1/polls', { method: 'POST', body: '{}' }))
+      .rejects.toBeInstanceOf(SessionExpiredError);
+    expect(client.fetch).toHaveBeenCalledTimes(1);
+    expect(client.clearToken).toHaveBeenCalled();
+    expect(auth.status()).toBe('anonymous');
+    expect(auth.message()).toContain('session expired');
+  });
+
+
   it('reports redirect errors and allows a subsequent sign-in attempt', async () => {
     await initialize();
     client.login.mockRejectedValueOnce(new Error('Redirect blocked'));
