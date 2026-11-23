@@ -1,6 +1,14 @@
 # Keycloak setup and handoff
 
-The frontend delegates sign-in, registration and account pages to Keycloak. The frontend does not handle user passwords or administer accounts.
+The frontend delegates sign-in and registration to Keycloak. Its local account page does not open the Keycloak Account Console, which is disabled in realm snapshot v7. The frontend does not handle user passwords or administer accounts.
+
+The account Security page starts password changes using the adapter's
+`login({ action: 'UPDATE_PASSWORD' })` application-initiated action. Keycloak
+collects the password and redirects to `/account?section=security`. The adapter's
+`onActionUpdate` callback supplies success/cancellation/error feedback. This does
+not require enabling Account Console or exposing an administrative client secret.
+Keep the UPDATE_PASSWORD required action enabled in Keycloak. Account deletion
+remains a local placeholder.
 
 ## Runtime configuration
 
@@ -17,7 +25,7 @@ Edit public/auth-config.json before running locally. In a deployed build, edit o
 
 Keep all fields present, including when enabled is false. This file is public: never add client secrets, passwords, SMTP keys, or administrative credentials.
 
-The current integration repository export matches the default realm/client settings and has DPoP-bound tokens enabled. Registration remains disabled there.
+The integration repository v7 export enables registration, DPoP-bound tokens, and the public frontend client. Account Console is disabled.
 
 ## Settings for the Keycloak administrator
 
@@ -44,6 +52,20 @@ The pinned keycloak-js 26.2.5 adapter uses the dpopConfig initialization option.
 Authenticated API calls use the pinned adapter's `fetch` method, which adds a DPoP proof when the access token is bound. The included Node gateway verifies the proof and access token before forwarding requests to the private services. Configure `KEYCLOAK_ISSUER`, `KEYCLOAK_JWKS_URL`, `KEYCLOAK_AUDIENCE` and `PUBLIC_ORIGIN` on that server. Poll Service still validates the forwarded token itself; it must use the same issuer and audience. The client-side route guards do not replace these checks.
 
 Access and refresh tokens stay in adapter memory. DPoP key persistence is managed by the adapter. No tokens are written to localStorage by this application.
+
+Before each authenticated API request, `updateToken(30)` refreshes the access token
+when it has less than 30 seconds remaining. The adapter uses its refresh token;
+no separate refresh endpoint, client secret, or offline_access scope is needed.
+Concurrent requests share one refresh operation. Token expiry also triggers a
+refresh. A refresh failure/timeout or an authenticated gateway response of 401
+clears the local session and asks the user to sign in again. Modifying requests
+are not automatically replayed. A 403 is an authorization failure and does not
+clear the session.
+
+Local realm settings checked on 2026-11-23: access token 300 seconds, SSO idle
+timeout 1800 seconds, maximum session 36000 seconds. Refresh-token revocation
+(`revokeRefreshToken`) is off; `refreshTokenMaxReuse` is therefore inactive.
+Refreshing does not extend the session beyond its configured maximum lifetime.
 
 ## Existing realm exports
 
@@ -75,3 +97,25 @@ The running local `votivo` realm has registration, the public frontend client, A
 The exact mapper is saved in [poll-service-audience-mapper.json](poll-service-audience-mapper.json) for another environment. Existing sessions need a token refresh or a new sign-in to obtain the updated audience. The integration repository's versioned realm export needs the same mapper for future fresh installations; this task updated the running local realm only.
 
 Real-user sign-in and voting against that realm have not been exercised. The browser suite uses a test identity provider, while the separate live-service chain uses its signed test tokens.
+
+## User Service profile integration
+
+After sign-in, the frontend loads `/api/v1/users/me/header`. Header names/initials
+come only from User Service, never from JWT name/email claims. If unavailable,
+identity is displayed as Account; account settings offer retry.
+The account page loads `/api/v1/users/me`, shows email/emailVerified, and PATCHes
+only firstName/lastName. A successful PATCH updates the header immediately.
+Email changes use `login({action: 'UPDATE_EMAIL'})`, return to the Profile section,
+and are reflected through the existing Keycloak events/synchronization. Reopening the account page re-reads the projection if event delivery has not completed yet.
+
+The gateway routes only GET /users/me/header and GET/PATCH /users/me. These routes
+verify audience user-service and forward the original Authorization/DPoP pair.
+The service verifies the proof independently; controlled X-Forwarded-Host/Proto
+preserve the browser URI. Compose enables SERVER_FORWARD_HEADERS_STRATEGY=framework
+and publishes User Service on loopback. Do not expose an alternative untrusted
+proxy path to the forwarded-header-enabled service. For standalone development,
+set SERVER_FORWARD_HEADERS_STRATEGY=framework on User Service too.
+Configure USER_URL on the gateway (Compose: http://user-service:8080).
+UPDATE_EMAIL must be enabled; realm snapshot v8 includes it.
+Token claims still supply authentication identity and authorization, not display
+profile fields. Account deletion remains a placeholder and is not proxied.
