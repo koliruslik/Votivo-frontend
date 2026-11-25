@@ -8,7 +8,9 @@ import {
   SignJWT,
 } from 'jose';
 
-const issuer = 'http://localhost:18089/realms/test';
+const port = Number(process.env['E2E_OIDC_PORT'] ?? 18089);
+const appOrigin = process.env['E2E_APP_ORIGIN'] ?? 'http://localhost:4200';
+const issuer = `http://localhost:${port}/realms/test`;
 const key = await generateKeyPair('RS256');
 const codes = new Map();
 function redirect(res, target, params, mode) {
@@ -21,7 +23,7 @@ function redirect(res, target, params, mode) {
 }
 const server = createServer(async (req, res) => {
   const url = new URL(req.url, issuer);
-  res.setHeader('Access-Control-Allow-Origin', 'http://localhost:4200');
+  res.setHeader('Access-Control-Allow-Origin', appOrigin);
   res.setHeader('Access-Control-Allow-Credentials', 'true');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, DPoP, Authorization');
   if (req.method === 'OPTIONS') {
@@ -60,7 +62,10 @@ const server = createServer(async (req, res) => {
       if (!req.headers.cookie?.includes('votivo-test-session=active'))
         return redirect(res, target, { error: 'login_required', state, iss: issuer }, mode);
       const code = randomUUID();
-      codes.set(code, { nonce: url.searchParams.get('nonce') });
+      codes.set(code, {
+        nonce: url.searchParams.get('nonce'),
+        admin: req.headers.cookie?.includes('votivo-test-admin=true') ?? false,
+      });
       return redirect(res, target, { code, state, session_state: randomUUID(), iss: issuer }, mode);
     }
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
@@ -75,7 +80,10 @@ const server = createServer(async (req, res) => {
       'votivo-test-session=active; HttpOnly; SameSite=Lax; Path=/realms/test',
     );
     const code = randomUUID();
-    codes.set(code, { nonce: url.searchParams.get('nonce') });
+    codes.set(code, {
+      nonce: url.searchParams.get('nonce'),
+      admin: req.headers.cookie?.includes('votivo-test-admin=true') ?? false,
+    });
     return redirect(
       res,
       url.searchParams.get('redirect_uri'),
@@ -101,7 +109,7 @@ const server = createServer(async (req, res) => {
       preferred_username: 'alex',
       name: 'Alex Morgan',
       // Keycloak realm roles are lower case; the composite `admin` role brings `user` along.
-      realm_access: { roles: ['admin', 'user'] },
+      realm_access: { roles: code?.admin ? ['admin', 'user'] : ['user'] },
       ...(cnf ? { cnf } : {}),
     };
     const sign = (extra, aud) =>
@@ -141,5 +149,5 @@ const server = createServer(async (req, res) => {
   res.writeHead(404);
   res.end();
 });
-server.listen(18089, '127.0.0.1', () => console.log('Test OIDC: http://localhost:18089'));
+server.listen(port, '127.0.0.1', () => console.log(`Test OIDC: ${issuer}`));
 process.on('SIGTERM', () => server.close());

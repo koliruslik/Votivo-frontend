@@ -1,6 +1,6 @@
 # Keycloak setup and handoff
 
-The frontend delegates sign-in and registration to Keycloak. Its local account page does not open the Keycloak Account Console, which is disabled in realm snapshot v7. The frontend does not handle user passwords or administer accounts.
+The frontend delegates sign-in and registration to Keycloak. Its local account page does not open the Keycloak Account Console, which is disabled in realm snapshot v7. The frontend does not handle passwords. Administrators manage user status through the protected User Service API.
 
 The account Security page starts password changes using the adapter's
 `login({ action: 'UPDATE_PASSWORD' })` application-initiated action. Keycloak
@@ -119,3 +119,31 @@ Configure USER_URL on the gateway (Compose: http://user-service:8080).
 UPDATE_EMAIL must be enabled; realm snapshot v8 includes it.
 Token claims still supply authentication identity and authorization, not display
 profile fields. Account deletion remains a placeholder and is not proxied.
+
+
+## Administrator accounts
+
+The realm administrator provisions administrator accounts in Keycloak; no public registration or
+special frontend password is required. In realm votivo, create an enabled user, configure credentials,
+and assign the realm role `admin` in Role mapping. Use the realm role, not the master-realm administrator
+or a service-account client. The existing admin composite includes user. Email verification and any
+required password change still follow the configured Keycloak policies.
+
+On sign-in, the frontend reads the signed token's realm_access.roles through the Keycloak adapter
+and opens `/admin`. User Service synchronizes the account by UUID and receives role updates through
+its existing identity event listener. No administrator is seeded with a hard-coded password and public
+registration never assigns admin. The browser remains a public client; management client credentials
+stay inside User Service.
+
+The Users panel supports server-side name/email search, active/blocked filtering, pagination and
+confirmed block/unblock operations. Self-blocking is disabled in the UI and rejected by User Service.
+The gateway requires the user-service audience and admin role, forwards the original DPoP proof,
+and preserves query parameters. User Service also checks the local account's status and admin role.
+Blocked/deleted accounts and stale administrator permissions are rejected by the backend.
+The poll moderation screen is available at `/admin/polls`, with read-only poll review and blocking.
+The administrator UI exposes only user listing/blocking/unblocking and poll listing/review/blocking.
+Regular profile, photo, voting, results and personal poll actions are unavailable to administrators;
+the gateway enforces this even for the composite `admin` + `user` role. Poll Service separately
+rejects administrator owner actions, and User Service denies administrator profile/photo operations.
+
+Administrator profiles do not offer account deletion. Their accounts can only be removed through Keycloak by the realm administrator; DELETE /api/v1/users/me rejects admin accounts with 403.

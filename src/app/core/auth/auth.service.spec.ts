@@ -33,6 +33,7 @@ function makeClient() {
   };
   return {
     authenticated: false,
+    hasRealmRole: vi.fn((_role: string) => false),
     idTokenParsed: undefined as Record<string, string> | undefined,
     init: vi.fn().mockResolvedValue(false),
     login: vi.fn().mockResolvedValue(undefined),
@@ -44,7 +45,9 @@ function makeClient() {
     fetch: vi.fn().mockImplementation((input: URL | RequestInfo) => {
       const url = new URL(input instanceof Request ? input.url : input.toString());
       if (url.pathname === '/api/v1/users/me/header')
-        return Promise.resolve(new Response(JSON.stringify({ firstName: 'Service', lastName: 'User' })));
+        return Promise.resolve(
+          new Response(JSON.stringify({ firstName: 'Service', lastName: 'User' })),
+        );
       if (url.pathname === '/api/v1/users/me')
         return Promise.resolve(new Response(JSON.stringify(profile)));
       return Promise.resolve(new Response('{}'));
@@ -207,6 +210,21 @@ describe('Keycloak account shell', () => {
     expect(client.logout).toHaveBeenCalledWith({ redirectUri: window.location.origin });
   });
 
+  it('opens administration once for a signed-in administrator', async () => {
+    client.authenticated = true;
+    client.hasRealmRole.mockReturnValue(true);
+    await initialize();
+    const navigate = vi.spyOn(TestBed.inject(Router), 'navigateByUrl').mockResolvedValue(true);
+    const fixture = TestBed.createComponent(App);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    expect(navigate).toHaveBeenCalledWith('/admin', { replaceUrl: true });
+    client.onAuthRefreshSuccess?.();
+    fixture.detectChanges();
+    expect(navigate).toHaveBeenCalledTimes(1);
+    navigate.mockRestore();
+  });
+
   it('loads the account name from the User Service header during initialization', async () => {
     client.authenticated = true;
     client.idTokenParsed = { name: 'Keycloak claim name' };
@@ -258,6 +276,45 @@ describe('Keycloak account shell', () => {
     expect(patchBody).toEqual({ firstName: 'Ada', lastName: 'Lovelace' });
     expect(auth.profile()).toMatchObject({ firstName: 'Ada', lastName: 'Lovelace' });
     expect(auth.displayName()).toBe('Ada Lovelace');
+  });
+
+  it('never sends a deletion request for an administrator account', async () => {
+    client.authenticated = true;
+    client.hasRealmRole.mockReturnValue(true);
+    await initialize();
+    await expect(auth.deleteAccount()).rejects.toThrow('only be deleted in Keycloak');
+    expect(client.fetch).not.toHaveBeenCalled();
+    expect(auth.authenticated()).toBe(true);
+    expect(client.clearToken).not.toHaveBeenCalled();
+  });
+
+  it.each([204, 202])('clears the session after accepted account deletion (%s)', async (status) => {
+    client.authenticated = true;
+    await initialize();
+    client.fetch.mockResolvedValue(new Response(null, { status }));
+    await auth.deleteAccount();
+    expect(client.fetch).toHaveBeenCalledWith(
+      expect.any(URL),
+      expect.objectContaining({ method: 'DELETE' }),
+    );
+    expect(auth.authenticated()).toBe(false);
+    expect(auth.profile()).toBeNull();
+    expect(client.clearToken).toHaveBeenCalled();
+    expect(auth.busy()).toBe(false);
+  });
+
+  it.each([
+    [403, 'blocked account'],
+    [409, 'published polls'],
+    [503, 'temporarily unavailable'],
+  ])('keeps the session when deletion is rejected (%s)', async (status, message) => {
+    client.authenticated = true;
+    await initialize();
+    client.fetch.mockResolvedValue(new Response(null, { status: Number(status) }));
+    await expect(auth.deleteAccount()).rejects.toThrow(String(message));
+    expect(auth.authenticated()).toBe(true);
+    expect(client.clearToken).not.toHaveBeenCalled();
+    expect(auth.busy()).toBe(false);
   });
 
   it('starts a password change for an authenticated account', async () => {
@@ -318,9 +375,12 @@ describe('Keycloak account shell', () => {
     client.authenticated = true;
     await initialize();
     let failRefresh!: (error: Error) => void;
-    client.updateToken.mockImplementation(() => new Promise<boolean>((_resolve, reject) => {
-      failRefresh = reject;
-    }));
+    client.updateToken.mockImplementation(
+      () =>
+        new Promise<boolean>((_resolve, reject) => {
+          failRefresh = reject;
+        }),
+    );
     const first = auth.request('/api/v1/polls/mine', { method: 'GET' }).catch((error) => error);
     const second = auth.request('/api/v1/polls', { method: 'GET' }).catch((error) => error);
 
@@ -375,9 +435,12 @@ describe('Keycloak account shell', () => {
     client.authenticated = true;
     await initialize();
     let finishRefresh!: (value: boolean) => void;
-    client.updateToken.mockImplementation(() => new Promise<boolean>((resolve) => {
-      finishRefresh = resolve;
-    }));
+    client.updateToken.mockImplementation(
+      () =>
+        new Promise<boolean>((resolve) => {
+          finishRefresh = resolve;
+        }),
+    );
     const first = auth.request('/api/v1/polls/mine', { method: 'GET' });
     const second = auth.request('/api/v1/polls', { method: 'GET' });
     expect(client.updateToken).toHaveBeenCalledTimes(1);
@@ -396,12 +459,33 @@ describe('Keycloak account shell', () => {
     client.authenticated = true;
     await initialize();
     client.fetch.mockResolvedValue(new Response('{}', { status: 401 }));
-    await expect(auth.request('/api/v1/polls', { method: 'POST', body: '{}' }))
-      .rejects.toBeInstanceOf(SessionExpiredError);
+    await expect(
+      auth.request('/api/v1/polls', { method: 'POST', body: '{}' }),
+    ).rejects.toBeInstanceOf(SessionExpiredError);
     expect(client.fetch).toHaveBeenCalledTimes(1);
     expect(client.clearToken).toHaveBeenCalled();
     expect(auth.status()).toBe('anonymous');
     expect(auth.message()).toContain('session expired');
+  });
+
+  it('clears a blocked session and reports the account restriction without replaying the request', async () => {
+    client.authenticated = true;
+    await initialize();
+    client.fetch.mockResolvedValue(new Response('{}', { status: 403, headers: { 'X-Account-Access': 'denied' } }));
+    await expect(auth.request('/api/v1/polls', { method: 'POST', body: '{}' })).rejects.toThrow('account is blocked');
+    expect(client.fetch).toHaveBeenCalledTimes(1);
+    expect(client.clearToken).toHaveBeenCalled();
+    expect(auth.authenticated()).toBe(false);
+    expect(auth.userId()).toBe('');
+    expect(auth.message()).toContain('account is blocked');
+  });
+
+  it('keeps the session for ordinary permission errors', async () => {
+    client.authenticated = true;
+    await initialize();
+    client.fetch.mockResolvedValue(new Response('{}', { status: 403 }));
+    expect((await auth.request('/api/v1/polls', { method: 'POST' })).status).toBe(403);
+    expect(auth.authenticated()).toBe(true);
   });
 
   it('reports redirect errors and allows a subsequent sign-in attempt', async () => {

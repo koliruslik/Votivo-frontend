@@ -142,6 +142,18 @@
       <aside class="stack editor-aside">
         <section class="panel form-section">
           <h2>Poll settings</h2>
+          <label for="poll-ends-at">Voting ends</label>
+          <input
+            id="poll-ends-at"
+            type="datetime-local"
+            [min]="minimumEndTime"
+            [value]="endTime()"
+            (input)="setEndTime($any($event.target).value)"
+            aria-describedby="end-time-hint"
+          />
+          <p class="hint" id="end-time-hint">
+            {{ timeZone }}. Required before publishing. Voting closes automatically.
+          </p>
           <label for="access">Who can find it?</label
           ><select
             id="access"

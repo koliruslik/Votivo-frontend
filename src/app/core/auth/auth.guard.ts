@@ -22,3 +22,10 @@ export const unsavedGuard: CanDeactivateFn<{
 }> = (component) =>
   !component.isSaving() &&
   (!component.hasUnsavedChanges() || window.confirm('Discard your unsaved changes?'));
+
+export const regularUserGuard: CanActivateFn = async () => {
+  const auth = inject(AuthService);
+  const router = inject(Router);
+  await auth.initialize();
+  return !auth.isAdmin() || router.createUrlTree(['/admin']);
+};

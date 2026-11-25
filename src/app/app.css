@@ -272,3 +272,12 @@
     align-items: start;
   }
 }
+
+.avatar {
+  overflow: hidden;
+}
+.avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}

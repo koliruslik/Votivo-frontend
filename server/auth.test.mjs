@@ -219,7 +219,7 @@ test('gateway rejects forged identity, protects private results, and forwards on
     res.end('{}');
   });
   const target = await listen(backend);
-  const app = createApp({
+  const app = createApp({ checkAccount: async () => 204,
     origin: 'http://localhost:4200',
     authenticate: makeAuth(),
     internalSecret: 'gateway-secret',
@@ -307,7 +307,7 @@ test('gateway authenticates User Service requests and forwards the original DPoP
   });
   const target = await listen(backend);
   const authenticateUser = createAuthenticator({ issuer, audience: 'user-service', keySet, requireDpop: false });
-  const app = createApp({
+  const app = createApp({ checkAccount: async () => 204,
     origin,
     authenticate: makeAuth(),
     authenticateUser,
@@ -362,7 +362,7 @@ test('gateway authenticates User Service requests and forwards the original DPoP
 
 test('serves the silent SSO callback to same-origin frames while protecting other pages', async (t) => {
   const { resolve } = await import('node:path');
-  const app = createApp({ root: resolve('public'), authenticate: makeAuth() });
+  const app = createApp({ checkAccount: async () => 204, root: resolve('public'), authenticate: makeAuth() });
   const base = await listen(app);
   t.after(() => {
     app.closeAllConnections();

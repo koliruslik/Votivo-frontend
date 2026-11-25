@@ -25,6 +25,7 @@ export function errorMessage(error: unknown): string {
 @Injectable({ providedIn: 'root' })
 export class PollService {
   private readonly auth = inject(AuthService);
+  adminPage = 0;
   private readonly shareTokens = new Map<string, string>();
   list(scope: 'public' | 'mine' | 'admin', page = 0): Promise<Page<PollSummary>> {
     const path = scope === 'admin' ? '/admin/polls' : scope === 'mine' ? '/polls/mine' : '/polls';

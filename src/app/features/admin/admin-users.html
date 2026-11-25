@@ -1,0 +1,161 @@
+<section class="users-panel" aria-label="User management">
+  <form class="users-toolbar" (submit)="$event.preventDefault(); search()">
+    <label class="user-search">
+      <span class="sr-only">Search users</span>
+      <input
+        type="search"
+        name="search"
+        placeholder="Name or email"
+        maxlength="255"
+        [value]="query()"
+        (input)="query.set($any($event.target).value)"
+      />
+    </label>
+    <button class="button" type="submit" [disabled]="updating()">Search</button>
+    <label class="user-filter">
+      <span class="sr-only">Account status</span>
+      <select
+        name="status"
+        [value]="status()"
+        [disabled]="updating()"
+        (change)="status.set($any($event.target).value); search()"
+      >
+        <option value="all">All accounts</option>
+        <option value="active">Active</option>
+        <option value="blocked">Blocked</option>
+      </select>
+    </label>
+  </form>
+  @if (error()) {
+    <div class="users-feedback" role="alert">
+      <p>{{ error() }}</p>
+      <button class="button" type="button" (click)="load()">Try again</button>
+    </div>
+  } @else if (loading()) {
+    <p class="users-feedback" role="status">Loading users…</p>
+  } @else if (result(); as page) {
+    <div class="users-meta">
+      <h2>
+        Users <span>{{ page.totalElements }}</span>
+      </h2>
+      <button type="button" class="text-button" [disabled]="updating()" (click)="load()">
+        Refresh
+      </button>
+    </div>
+    @if (page.items.length) {
+      <table class="users-table">
+        <thead>
+          <tr>
+            <th scope="col">User</th>
+            <th scope="col">Status</th>
+            <th scope="col">Joined</th>
+            <th scope="col"><span class="sr-only">Action</span></th>
+          </tr>
+        </thead>
+        <tbody>
+          @for (user of page.items; track user.id) {
+            <tr>
+              <td class="user-identity">
+                <span class="user-name"
+                  >{{ name(user) }}
+                  @if (user.id === auth.userId()) {
+                    <span class="user-role">You</span>
+                  }
+                  @if (user.roles.includes('admin')) {
+                    <span class="user-role">Admin</span>
+                  }</span
+                ><span class="user-email">{{ user.email || 'No email' }}</span>
+              </td>
+              <td>
+                <span class="account-status" [class.blocked]="!user.enabled">{{
+                  user.enabled ? 'Active' : 'Blocked'
+                }}</span>
+              </td>
+              <td class="user-joined">
+                {{ user.createdAt ? (user.createdAt | date: 'MMM d, y') : '—' }}
+              </td>
+              <td class="user-action">
+                <button
+                  type="button"
+                  class="button"
+                  [class.block-action]="user.enabled"
+                  [disabled]="updating() || user.id === auth.userId()"
+                  (click)="openAction(user)"
+                  [attr.aria-label]="
+                    (user.enabled ? 'Block ' : 'Unblock ') + (user.email || name(user))
+                  "
+                  [title]="user.id === auth.userId() ? 'You cannot block your own account' : ''"
+                >
+                  {{ user.enabled ? 'Block' : 'Unblock' }}
+                </button>
+              </td>
+            </tr>
+          }
+        </tbody>
+      </table>
+    } @else {
+      <div class="users-empty">
+        <h3>No users found</h3>
+        <p>Try a different name, email or status.</p>
+      </div>
+    }
+    @if (page.totalPages > 1) {
+      <nav class="users-pagination" aria-label="User list pages">
+        <button
+          class="button"
+          type="button"
+          [disabled]="page.page === 0 || updating()"
+          (click)="load(page.page - 1)"
+        >
+          Previous
+        </button>
+        <span>Page {{ page.page + 1 }} of {{ page.totalPages }}</span>
+        <button
+          class="button"
+          type="button"
+          [disabled]="page.page + 1 >= page.totalPages || updating()"
+          (click)="load(page.page + 1)"
+        >
+          Next
+        </button>
+      </nav>
+    }
+  }
+</section>
+<dialog
+  #confirmation
+  class="confirm-dialog"
+  aria-labelledby="account-status-title"
+  (cancel)="updating() ? $event.preventDefault() : null"
+>
+  @if (selected(); as user) {
+    <h2 id="account-status-title">
+      {{ user.enabled ? 'Block this account?' : 'Unblock this account?' }}
+    </h2>
+    <p class="confirmation-user">{{ user.email || name(user) }}</p>
+    <p>
+      {{
+        user.enabled
+          ? 'The user will be signed out and will not be able to sign in.'
+          : 'The user will be able to sign in again.'
+      }}
+    </p>
+    @if (actionError()) {
+      <p class="action-error" role="alert">{{ actionError() }}</p>
+    }
+    <div class="dialog-actions">
+      <button class="button" type="button" [disabled]="updating()" (click)="confirmation.close()">
+        Cancel
+      </button>
+      <button
+        class="button primary"
+        type="button"
+        [class.danger]="user.enabled"
+        [disabled]="updating()"
+        (click)="changeStatus()"
+      >
+        {{ updating() ? 'Updating…' : user.enabled ? 'Block account' : 'Unblock account' }}
+      </button>
+    </div>
+  }
+</dialog>

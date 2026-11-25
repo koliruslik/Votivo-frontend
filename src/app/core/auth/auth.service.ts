@@ -1,5 +1,5 @@
 import { HttpClient } from '@angular/common/http';
-import { computed, inject, Injectable, signal } from '@angular/core';
+import { computed, DestroyRef, inject, Injectable, signal } from '@angular/core';
 import Keycloak from 'keycloak-js';
 import { firstValueFrom, timeout } from 'rxjs';
 import { AuthConfig, parseAuthConfig } from './auth-config';
@@ -22,6 +22,11 @@ export class SessionExpiredError extends Error {
     super('Your session expired. Please sign in again.');
   }
 }
+export class AccountAccessDeniedError extends Error {
+  constructor() {
+    super('Your account is blocked or this session has been revoked. Sign in again or contact an administrator.');
+  }
+}
 
 @Injectable({ providedIn: 'root' })
 export class AuthService {
@@ -40,6 +45,7 @@ export class AuthService {
   private sessionVersion = 0;
   private readonly subject = signal('');
   private readonly admin = signal(false);
+  private readonly accountRestriction = signal(false);
   private client?: Keycloak;
   private rejectedSession = false;
   private initialization?: Promise<void>;
@@ -65,6 +71,19 @@ export class AuthService {
   readonly registrationEnabled = this.registrationAllowed.asReadonly();
   readonly userId = this.subject.asReadonly();
   readonly isAdmin = this.admin.asReadonly();
+  readonly accountRestricted = this.accountRestriction.asReadonly();
+
+  constructor() {
+    const recheck = () => {
+      if (this.authenticated() && !document.hidden) void this.refreshHeader();
+    };
+    const timer = setInterval(recheck, 30_000);
+    document.addEventListener('visibilitychange', recheck);
+    inject(DestroyRef).onDestroy(() => {
+      clearInterval(timer);
+      document.removeEventListener('visibilitychange', recheck);
+    });
+  }
 
   async request(path: string, init: RequestInit): Promise<Response> {
     const url = new URL(path, window.location.origin);
@@ -77,6 +96,12 @@ export class AuthService {
     const headers = new Headers(init.headers);
     headers.set('Authorization', `Bearer ${this.client.token}`);
     const response = await this.client.fetch(url, { ...init, headers });
+    if (response.status === 403 && response.headers.get('X-Account-Access') === 'denied') {
+      const error = new AccountAccessDeniedError();
+      this.accountRestriction.set(true);
+      this.expireSession(this.client, error.message);
+      throw error;
+    }
     if (response.status === 401) {
       this.expireSession(this.client);
       throw new SessionExpiredError();
@@ -191,6 +216,41 @@ export class AuthService {
     const profile = await response.json();
     if (!this.authenticated() || version !== this.sessionVersion) throw new SessionExpiredError();
     this.applyProfile(profile);
+  }
+
+  async deleteAccount(): Promise<void> {
+    if (!this.authenticated()) throw new SessionExpiredError();
+    if (this.isAdmin() || this.profile()?.roles.includes('admin'))
+      throw new Error('Administrator accounts can only be deleted in Keycloak.');
+    if (this.busy()) throw new Error('Wait for the current account action to finish.');
+    const version = this.sessionVersion;
+    this.actionPending.set(true);
+    try {
+      const response = await this.request('/api/v1/users/me', {
+        method: 'DELETE',
+        signal: AbortSignal.timeout(50000),
+      });
+      if (!response.ok) {
+        const messages: Record<number, string> = {
+          403: 'A blocked account cannot be deleted.',
+          409: 'Close your published polls before deleting your account. Drafts can stay.',
+          503: 'Account deletion is temporarily unavailable. Please try again later.',
+        };
+        throw new Error(
+          messages[response.status] ?? 'Could not delete your account. Please try again.',
+        );
+      }
+      if (!this.authenticated() || version !== this.sessionVersion) throw new SessionExpiredError();
+      this.rejectedSession = true;
+      this.clearSession();
+      try {
+        await this.client?.clearToken();
+      } catch {
+        /* Local session is already cleared. */
+      }
+    } finally {
+      this.actionPending.set(false);
+    }
   }
 
   private applyProfile(profile: UserProfile): void {
@@ -330,14 +390,14 @@ export class AuthService {
     }
   }
 
-  private expireSession(client: Keycloak): void {
+  private expireSession(client: Keycloak, message = 'Your session expired. Please sign in again.'): void {
     this.rejectedSession = true;
     client.onAuthSuccess = undefined;
     client.onAuthRefreshSuccess = undefined;
     client.onTokenExpired = undefined;
     void client.clearToken().catch(() => undefined);
     this.clearSession();
-    this.currentMessage.set('Your session expired. Please sign in again.');
+    this.currentMessage.set(message);
   }
 
   private async withIdentityDeadline<T>(operation: Promise<T>): Promise<T> {

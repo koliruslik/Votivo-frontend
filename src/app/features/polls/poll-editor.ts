@@ -25,6 +25,20 @@ export class PollEditor {
   readonly loading = signal(!!this.id);
   readonly busy = signal(false);
   readonly error = signal('');
+  readonly endTime = signal('');
+  readonly timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  get minimumEndTime(): string {
+    return this.localDateTime(new Date(Date.now() + 60_000).toISOString());
+  }
+  setEndTime(value: string): void {
+    this.endTime.set(value);
+    this.touch();
+  }
+  private localDateTime(value: string): string {
+    const date = new Date(value);
+    const pad = (n: number) => String(n).padStart(2, '0');
+    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+  }
   private dirty = false;
   private generation = 0;
   readonly ready = signal(!this.id);
@@ -112,6 +126,7 @@ export class PollEditor {
       if (poll.status !== 'DRAFT' || poll.blocked)
         throw new Error('Only unblocked drafts can be edited.');
       this.form.set({
+        endsAt: poll.endsAt ?? null,
         title: poll.title,
         description: poll.description,
         accessType: poll.accessType,
@@ -124,6 +139,7 @@ export class PollEditor {
         })),
       });
       this.ready.set(true);
+      this.endTime.set(poll.endsAt ? this.localDateTime(poll.endsAt) : '');
       this.dirty = false;
     } catch (error) {
       if (version === this.generation) this.error.set(errorMessage(error));
@@ -135,6 +151,12 @@ export class PollEditor {
     event.preventDefault();
     if (this.busy() || !this.ready()) return;
     const input = structuredClone(this.form());
+    const end = this.endTime() ? new Date(this.endTime()) : null;
+    if (end && (!Number.isFinite(end.getTime()) || end.getTime() <= Date.now())) {
+      this.error.set('Choose an end date and time in the future.');
+      return;
+    }
+    input.endsAt = end?.toISOString() ?? null;
     const version = this.generation;
     if (
       !input.title.trim() ||

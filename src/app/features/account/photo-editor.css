@@ -1,0 +1,114 @@
+.photo-dialog {
+  width: min(480px, calc(100vw - 32px));
+  max-height: calc(100dvh - 32px);
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  color: var(--ink);
+  background: var(--surface);
+  box-shadow: 0 24px 80px #152d2540;
+  overflow: auto;
+}
+.photo-dialog::backdrop {
+  background: #172e28a6;
+}
+.photo-editor {
+  padding: 24px;
+}
+.photo-editor-heading {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: 20px;
+}
+.photo-editor-heading h2 {
+  font-size: 1.25rem;
+}
+.photo-editor-heading p,
+.photo-editor-note {
+  font-size: 0.875rem;
+  color: var(--muted);
+  margin-top: 6px;
+  line-height: 1.5;
+}
+.photo-close {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  flex: 0 0 32px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--background);
+  color: var(--ink);
+  font-size: 1.6rem;
+  line-height: 1;
+}
+.photo-crop-stage {
+  position: relative;
+  width: 100%;
+  height: min(360px, 42dvh);
+  overflow: hidden;
+  border-radius: 10px;
+  background: #202b2b;
+}
+.photo-crop-stage .reactEasyCrop_CropArea {
+  border: 2px solid #fff;
+  color: #152d2599;
+}
+.photo-crop-stage .reactEasyCrop_Container:focus-visible {
+  outline: 3px solid #8dc9ac;
+  outline-offset: -4px;
+}
+.photo-crop-busy {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: #152d2580;
+  color: white;
+  z-index: 2;
+}
+.photo-zoom {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-top: 20px;
+  font-size: 0.875rem;
+}
+.photo-zoom input[type='range'] {
+  flex: 1;
+  min-width: 0;
+  width: auto;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  accent-color: var(--accent);
+}
+.photo-zoom output {
+  min-width: 42px;
+  text-align: right;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.photo-editor-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding-top: 22px;
+}
+.photo-editor-error {
+  color: var(--danger);
+  font-size: 0.875rem;
+  margin-top: 12px;
+}
+@media (max-width: 520px) {
+  .photo-editor {
+    padding: 18px;
+  }
+  .photo-editor-actions .button {
+    flex: 1;
+  }
+}

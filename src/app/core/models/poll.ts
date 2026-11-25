@@ -7,6 +7,7 @@ export interface PollSummary {
   anonymous: boolean;
   blocked: boolean;
   createdAt: string;
+  endsAt?: string | null;
 }
 export interface Poll extends PollSummary {
   ownerId: string;
@@ -22,6 +23,7 @@ export interface Question {
   options: { id: string; text: string }[];
 }
 export interface PollInput {
+  endsAt?: string | null;
   title: string;
   description: string;
   accessType: 'PUBLIC' | 'LINK';

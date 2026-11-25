@@ -71,6 +71,6 @@ export function createAuthenticator({ issuer, audience, jwksUrl, keySet, require
     } else if (scheme.toLowerCase() !== 'bearer') throw new Error('Unexpected proof scheme');
     const roles = Array.isArray(payload.realm_access?.roles) ? payload.realm_access.roles : [];
     const admin = roles.includes('admin');
-    return { subject: payload.sub, token, admin, user: admin || roles.includes('user') };
+    return { subject: payload.sub, issuedAt: payload.iat, token, admin, user: admin || roles.includes('user') };
   };
 }

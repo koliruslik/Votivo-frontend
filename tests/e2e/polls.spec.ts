@@ -14,6 +14,7 @@ const poll = {
   allowVoteChange: true,
   blocked: false,
   createdAt: '2026-11-20T12:00:00Z',
+  endsAt: '2099-12-31T12:00:00Z',
   questions: [
     {
       id: question,
@@ -31,7 +32,7 @@ async function setup(page: Page, signedIn = false) {
     route.fulfill({
       json: {
         enabled: signedIn,
-        url: 'http://localhost:18089',
+        url: `http://localhost:${process.env['E2E_OIDC_PORT'] ?? '18089'}`,
         realm: 'test',
         clientId: 'votivo-frontend',
         registrationEnabled: true,
@@ -109,7 +110,11 @@ async function setup(page: Page, signedIn = false) {
 async function login(page: Page) {
   await page.getByRole('button', { name: 'Sign in', exact: true }).click();
   await page.getByRole('button', { name: 'Continue as test user' }).click();
+  const summary = page.locator('.account-menu summary');
+  await expect(summary).toBeVisible();
+  await summary.click();
   await expect(page.getByRole('button', { name: 'Sign out', exact: true })).toBeVisible();
+  await summary.click();
 }
 test('catalog, search, filters, navigation and mobile layout', async ({ page }, info) => {
   await setup(page);
@@ -146,6 +151,7 @@ test('authenticated create flow, vote and withdraw', async ({ page }, info) => {
   await login(page);
   await page.getByRole('link', { name: 'Create poll', exact: true }).click();
   await page.getByLabel('Poll title').fill('A new team poll');
+  await page.getByLabel('Voting ends', { exact: true }).fill('2099-12-31T14:00');
   await page.getByLabel('Question *', { exact: true }).fill('Where next?');
   await page.getByLabel('Question 1, option 1', { exact: true }).fill('Cafe');
   await page.getByLabel('Question 1, option 2', { exact: true }).fill('Park');
@@ -160,6 +166,7 @@ test('authenticated create flow, vote and withdraw', async ({ page }, info) => {
     title: 'A new team poll',
     anonymous: true,
     allowVoteChange: false,
+    endsAt: await page.evaluate(() => new Date('2099-12-31T14:00').toISOString()),
   });
   await expect(page.getByRole('heading', { name: poll.title })).toBeVisible();
   await page.getByRole('button', { name: 'Publish poll', exact: true }).click();
@@ -277,7 +284,7 @@ test('shared anonymous poll carries link access and keeps prior responses locked
   await expect(page.getByRole('button', { name: 'Edit response' })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Withdraw my vote' })).toHaveCount(0);
   await expect(page.getByLabel('Poll link', { exact: true })).toHaveValue(
-    `http://localhost:4200/s/${token}`,
+    new URL(`/s/${token}`, page.url()).href,
   );
   const resultRequest = page.waitForRequest((request) =>
     new URL(request.url()).pathname.endsWith('/results'),
@@ -306,18 +313,70 @@ test('owner closes and archives a poll with explicit confirmation', async ({ pag
   await expect(page.getByRole('button', { name: 'Close voting', exact: true })).toHaveCount(0);
 });
 
-test('administrator blocks a poll and voting becomes unavailable', async ({ page }) => {
+test('draft deadline is required for publication and survives editing in local time', async ({ page }) => {
   await setup(page, true);
-  await page.route(`**/api/v1/admin/polls/${id}/block`, (route) =>
-    route.fulfill({ json: { ...poll, blocked: true } }),
-  );
+  let draft = { ...poll, status: 'DRAFT', endsAt: null as string | null };
+  await page.route(`**/api/v1/polls/${id}`, async route => {
+    if (route.request().method() === 'PUT') {
+      const input = route.request().postDataJSON();
+      draft = { ...draft, ...input, questions: poll.questions };
+    }
+    await route.fulfill({ json: draft });
+  });
   await page.goto('/polls');
   await login(page);
-  await page.locator('.poll-card').first().click();
+  await page.goto(`/polls/${id}`);
+  await expect(page.getByRole('button', { name: 'Publish poll', exact: true })).toBeDisabled();
+  await page.getByRole('link', { name: 'Edit draft', exact: true }).click();
+  const field = page.getByLabel('Voting ends', { exact: true });
+  await expect(field).toHaveValue('');
+  await field.fill('2099-12-31T14:30');
+  const request = page.waitForRequest(req => req.method() === 'PUT' && req.url().endsWith(`/polls/${id}`));
+  await page.getByRole('button', { name: 'Save draft', exact: true }).click();
+  expect((await request).postDataJSON().endsAt).toBe(await page.evaluate(() => new Date('2099-12-31T14:30').toISOString()));
+  await expect(page.getByRole('button', { name: 'Publish poll', exact: true })).toBeEnabled();
+  await page.getByRole('link', { name: 'Edit draft', exact: true }).click();
+  await expect(field).toHaveValue('2099-12-31T14:30');
+});
+
+test('voting becomes unavailable at the deadline without reloading the page', async ({ page }) => {
+  await setup(page, true);
+  await page.goto('/polls');
+  await login(page);
+  await page.route(`**/api/v1/polls/${id}`, route => route.fulfill({
+    json: { ...poll, endsAt: new Date(Date.now() + 4000).toISOString() },
+  }));
+  await page.goto(`/polls/${id}`);
+  const radio = page.getByRole('radio', { name: 'The neighbourhood cafe', exact: true });
+  await expect(radio).toBeEnabled();
+  await expect(radio).toBeDisabled({ timeout: 10000 });
+  await expect(page.getByText('Closed', { exact: true })).toBeVisible();
+  await expect(page.getByText('Voting has ended.', { exact: false })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Close voting', exact: true })).toHaveCount(0);
+});
+
+test('administrator reviews and blocks polls without participant or owner actions', async ({ page }, info) => {
+  await page.context().addCookies([{ name: 'votivo-test-admin', value: 'true',
+    url: `http://localhost:${process.env['E2E_OIDC_PORT'] ?? '18089'}` }]);
+  await setup(page, true);
+  await page.route(`**/api/v1/admin/polls/${id}/block`, route => route.fulfill({ json: { ...poll, blocked: true } }));
+  await page.goto('/polls');
+  await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+  await page.getByRole('button', { name: 'Continue as test user' }).click();
+  await expect(page).toHaveURL(/\/admin$/);
+  await page.getByRole('link', { name: 'Polls', exact: true }).click();
+  await page.getByRole('link', { name: 'Review ' + poll.title, exact: true }).click();
+  await expect(page.getByRole('heading', { name: poll.title, exact: true })).toBeVisible();
+  await page.screenshot({ path: `test-results/admin-poll-review-${info.project.name}.png`, fullPage: true });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await expect(page.getByRole('radio')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Close voting', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('link', { name: 'Create poll', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('navigation', { name: 'Administration sections', exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Block poll', exact: true }).click();
   await page.getByRole('dialog').getByRole('button', { name: 'Block poll', exact: true }).click();
   await expect(page.getByText('Blocked', { exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Block poll', exact: true })).toHaveCount(0);
-  await page.getByRole('tab', { name: 'Vote', exact: true }).click();
-  await expect(page.getByRole('radio').first()).toBeDisabled();
+  await page.getByRole('link', { name: 'Users', exact: true }).click();
+  await expect(page).toHaveURL(/\/admin$/);
 });

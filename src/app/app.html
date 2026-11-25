@@ -1,7 +1,11 @@
 <a class="skip-link" href="#main-content">Skip to content</a>
 <header class="site-header">
   <div class="header-inner">
-    <a class="brand" routerLink="/polls" aria-label="Votivo home" (click)="menuOpen.set(false)"
+    <a
+      class="brand"
+      [routerLink]="auth.isAdmin() ? '/admin' : '/polls'"
+      aria-label="Votivo home"
+      (click)="menuOpen.set(false)"
       ><svg viewBox="0 0 32 32" aria-hidden="true">
         <rect width="32" height="32" rx="9" fill="currentColor" />
         <path
@@ -14,44 +18,50 @@
         /></svg
       ><span>votivo<span class="brand-period">.</span></span></a
     >
-    <button
-      class="menu-toggle icon-button"
-      (click)="menuOpen.set(!menuOpen())"
-      [attr.aria-expanded]="menuOpen()"
-      aria-controls="main-nav"
-      aria-label="Toggle navigation"
-    >
-      ☰
-    </button>
-    <nav
-      id="main-nav"
-      class="main-nav"
-      [class.mobile-open]="menuOpen()"
-      aria-label="Main navigation"
-    >
-      <a
-        routerLink="/polls"
-        routerLinkActive="nav-active"
-        [routerLinkActiveOptions]="{ exact: true }"
-        (click)="menuOpen.set(false)"
-        >Explore</a
+    @if (!auth.isAdmin()) {
+      <button
+        class="menu-toggle icon-button"
+        (click)="menuOpen.set(!menuOpen())"
+        [attr.aria-expanded]="menuOpen()"
+        aria-controls="main-nav"
+        aria-label="Toggle navigation"
       >
-      @if (auth.isAdmin()) {
-        <a routerLink="/admin" routerLinkActive="nav-active" (click)="menuOpen.set(false)"
-          >Moderation</a
+        ☰
+      </button>
+      <nav
+        id="main-nav"
+        class="main-nav"
+        [class.mobile-open]="menuOpen()"
+        aria-label="Main navigation"
+      >
+        <a
+          routerLink="/polls"
+          routerLinkActive="nav-active"
+          [routerLinkActiveOptions]="{ exact: true }"
+          (click)="menuOpen.set(false)"
+          >Explore</a
         >
-      }
-      <a routerLink="/help" routerLinkActive="nav-active" (click)="menuOpen.set(false)">Help</a>
-    </nav>
+        <a routerLink="/help" routerLinkActive="nav-active" (click)="menuOpen.set(false)">Help</a>
+      </nav>
+    }
     <nav class="account-nav" aria-label="Account" [attr.aria-busy]="auth.busy()">
-      @if (auth.authenticated()) {
+      @if (auth.isAdmin()) {
+        <span class="account-name">{{ auth.displayName() }}</span>
+        <button class="button" [disabled]="auth.busy()" (click)="auth.signOut()">Sign out</button>
+      } @else if (auth.authenticated()) {
         <details class="account-menu" #accountMenu>
           <summary
             class="account-link"
             [attr.aria-label]="'Account options for ' + auth.displayName()"
           >
             <span class="account-name">{{ auth.displayName() }}</span>
-            <span class="avatar" aria-hidden="true">{{ auth.initials() }}</span>
+            <span class="avatar" aria-hidden="true">
+              @if (photos.url(); as photo) {
+                <img [src]="photo" alt="" />
+              } @else {
+                {{ auth.initials() }}
+              }
+            </span>
           </summary>
           <div class="account-dropdown">
             <a routerLink="/account" (click)="accountMenu.open = false">My account</a>
@@ -90,7 +100,9 @@
   >
 }
 <main id="main-content" class="main-container" tabindex="-1"><router-outlet /></main>
-<footer class="site-footer">
-  <a class="footer-brand" routerLink="/polls">Votivo</a><span>Room for every opinion.</span
-  ><a routerLink="/help">How it works</a><span class="copyright">© {{ year }} Votivo</span>
-</footer>
+@if (!auth.isAdmin()) {
+  <footer class="site-footer">
+    <a class="footer-brand" routerLink="/polls">Votivo</a><span>Room for every opinion.</span
+    ><a routerLink="/help">How it works</a><span class="copyright">© {{ year }} Votivo</span>
+  </footer>
+}

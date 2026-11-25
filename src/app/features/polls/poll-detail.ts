@@ -1,5 +1,5 @@
 import { DatePipe, DecimalPipe } from '@angular/common';
-import { Component, computed, ElementRef, inject, signal, viewChild } from '@angular/core';
+import { Component, computed, DestroyRef, ElementRef, inject, signal, viewChild } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { AuthService } from '../../core/auth/auth.service';
@@ -36,7 +36,10 @@ export class PollDetail {
   readonly owner = computed(
     () => !!this.auth.userId() && this.poll()?.ownerId === this.auth.userId(),
   );
-  readonly open = computed(() => this.poll()?.status === 'PUBLISHED' && !this.poll()?.blocked);
+  readonly now = signal(Date.now());
+  readonly deadlinePassed = computed(() => !!this.poll()?.endsAt && Date.parse(this.poll()!.endsAt!) <= this.now());
+  readonly needsEndTime = computed(() => this.poll()?.status === 'DRAFT' && (!this.poll()?.endsAt || this.deadlinePassed()));
+  readonly open = computed(() => this.poll()?.status === 'PUBLISHED' && !this.poll()?.blocked && !this.deadlinePassed());
   readonly editableVote = computed(
     () =>
       this.auth.authenticated() &&
@@ -85,6 +88,8 @@ export class PollDetail {
     return this.router.url;
   }
   constructor() {
+    const timer = setInterval(() => this.now.set(Date.now()), 1000);
+    inject(DestroyRef).onDestroy(() => clearInterval(timer));
     this.route.paramMap.pipe(takeUntilDestroyed()).subscribe(() => void this.load());
   }
   async load(): Promise<void> {

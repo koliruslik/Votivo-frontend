@@ -1,8 +1,10 @@
-import { Component, effect, inject, signal, untracked } from '@angular/core';
+import { Component, ElementRef, ViewChild, effect, inject, signal, untracked } from '@angular/core';
 import { AuthService } from '../../core/auth/auth.service';
-import { ActivatedRoute } from '@angular/router';
+import { ActivatedRoute, Router } from '@angular/router';
+import { PhotoSettings } from './photo-settings';
 
 @Component({
+  imports: [PhotoSettings],
   styleUrl: './account-page.css',
   template: `
     <header class="account-heading">
@@ -36,49 +38,45 @@ import { ActivatedRoute } from '@angular/router';
               <button class="button" (click)="reload()">Try again</button>
             }
             @if (auth.profile(); as profile) {
-              <div class="profile-preview">
-                <span class="profile-avatar" aria-hidden="true">{{ auth.initials() }}</span>
-                <div>
-                  <p class="field-label">Full name</p>
-                  <h2>{{ auth.displayName() }}</h2>
-                </div>
+              <div class="profile-editor">
+                <app-photo-settings />
+                <form class="profile-form" (submit)="$event.preventDefault(); save()">
+                  <div class="name-fields">
+                    <label
+                      >First name<input
+                        name="firstName"
+                        [value]="firstName"
+                        (input)="firstName = $any($event.target).value"
+                        required
+                        maxlength="255"
+                        autocomplete="given-name"
+                        [disabled]="saving()"
+                    /></label>
+                    <label
+                      >Last name<input
+                        name="lastName"
+                        [value]="lastName"
+                        (input)="lastName = $any($event.target).value"
+                        required
+                        maxlength="255"
+                        autocomplete="family-name"
+                        [disabled]="saving()"
+                    /></label>
+                  </div>
+                  <button
+                    class="button primary"
+                    type="submit"
+                    [disabled]="
+                      saving() ||
+                      !firstName.trim() ||
+                      !lastName.trim() ||
+                      (firstName === profile.firstName && lastName === profile.lastName)
+                    "
+                  >
+                    {{ saving() ? 'Saving…' : 'Save changes' }}
+                  </button>
+                </form>
               </div>
-              <form class="profile-form" (submit)="$event.preventDefault(); save()">
-                <div class="name-fields">
-                  <label
-                    >First name<input
-                      name="firstName"
-                      [value]="firstName"
-                      (input)="firstName = $any($event.target).value"
-                      required
-                      maxlength="255"
-                      autocomplete="given-name"
-                      [disabled]="saving()"
-                  /></label>
-                  <label
-                    >Last name<input
-                      name="lastName"
-                      [value]="lastName"
-                      (input)="lastName = $any($event.target).value"
-                      required
-                      maxlength="255"
-                      autocomplete="family-name"
-                      [disabled]="saving()"
-                  /></label>
-                </div>
-                <button
-                  class="button primary"
-                  type="submit"
-                  [disabled]="
-                    saving() ||
-                    !firstName.trim() ||
-                    !lastName.trim() ||
-                    (firstName === profile.firstName && lastName === profile.lastName)
-                  "
-                >
-                  {{ saving() ? 'Saving…' : 'Save changes' }}
-                </button>
-              </form>
               <div class="setting-row email-row">
                 <div>
                   <h3>Email</h3>
@@ -114,20 +112,19 @@ import { ActivatedRoute } from '@angular/router';
             @if (auth.passwordChangeMessage()) {
               <p class="preview-notice" role="status">{{ auth.passwordChangeMessage() }}</p>
             }
-            <div class="deletion-section">
-              <h3>Delete account</h3>
-              <p>Permanently remove your account. Not available yet.</p>
-              <button
-                class="delete-button"
-                (click)="
-                  preview(
-                    'Account deletion is not available yet. Your account has not been deleted.'
-                  )
-                "
-              >
-                Delete account
-              </button>
-            </div>
+            @if (!auth.isAdmin() && !auth.profile()?.roles?.includes('admin')) {
+              <div class="deletion-section">
+                <h3>Delete account</h3>
+                <p>Delete your profile and sign out. Published polls must be closed first.</p>
+                <button
+                  class="delete-button"
+                  [disabled]="auth.busy() || deleting()"
+                  (click)="openDeletion()"
+                >
+                  Delete account
+                </button>
+              </div>
+            }
           }
           @if (notice()) {
             <p class="preview-notice" role="status">{{ notice() }}</p>
@@ -143,6 +140,38 @@ import { ActivatedRoute } from '@angular/router';
         </button>
       </section>
     }
+    <dialog
+      #deletionDialog
+      class="confirm-dialog"
+      aria-labelledby="delete-account-title"
+      (cancel)="deleting() ? $event.preventDefault() : null"
+    >
+      <h2 id="delete-account-title">Delete your account?</h2>
+      <p>
+        Your profile and photo will be removed and you will be signed out. This cannot be undone.
+      </p>
+      @if (deletionError()) {
+        <p class="deletion-error" role="alert">{{ deletionError() }}</p>
+      }
+      <div class="dialog-actions">
+        <button
+          type="button"
+          class="button"
+          [disabled]="deleting()"
+          (click)="deletionDialog.close()"
+        >
+          Cancel
+        </button>
+        <button
+          type="button"
+          class="button danger"
+          [disabled]="deleting()"
+          (click)="deleteAccount()"
+        >
+          {{ deleting() ? 'Deleting�' : 'Delete account' }}
+        </button>
+      </div>
+    </dialog>
   `,
 })
 export class AccountPage {
@@ -154,6 +183,11 @@ export class AccountPage {
   );
   readonly notice = signal('');
   readonly saving = signal(false);
+  readonly deleting = signal(false);
+  readonly deletionError = signal('');
+  private readonly router = inject(Router);
+  @ViewChild('deletionDialog', { static: true })
+  private deletionDialog!: ElementRef<HTMLDialogElement>;
   firstName = '';
   lastName = '';
   constructor() {
@@ -191,7 +225,26 @@ export class AccountPage {
     this.section.set(section);
     this.notice.set('');
   }
-  preview(message: string): void {
-    this.notice.set(message);
+  openDeletion(): void {
+    if (this.auth.isAdmin() || this.auth.profile()?.roles.includes('admin')) return;
+    this.deletionError.set('');
+    this.deletionDialog.nativeElement.showModal();
+  }
+
+  async deleteAccount(): Promise<void> {
+    if (this.deleting()) return;
+    this.deleting.set(true);
+    this.deletionError.set('');
+    try {
+      await this.auth.deleteAccount();
+      this.deletionDialog.nativeElement.close();
+      await this.router.navigateByUrl('/polls');
+    } catch (error) {
+      this.deletionError.set(
+        error instanceof Error ? error.message : 'Could not delete your account. Please try again.',
+      );
+    } finally {
+      this.deleting.set(false);
+    }
   }
 }

@@ -10,7 +10,7 @@
 } @else if (poll(); as p) {
   <div class="detail-heading">
     <div class="card-top">
-      <app-poll-badge [status]="p.status" [blocked]="p.blocked" /><span class="meta"
+      <app-poll-badge [status]="p.status === 'PUBLISHED' && deadlinePassed() ? 'CLOSED' : p.status" [blocked]="p.blocked" /><span class="meta"
         >{{ p.accessType === 'LINK' ? 'Link only' : 'Public poll' }} ·
         {{ p.anonymous ? 'Anonymous' : 'Account-based' }}</span
       >
@@ -23,6 +23,9 @@
       Created {{ p.createdAt | date: 'mediumDate' }} · {{ p.questions.length }}
       {{ p.questions.length === 1 ? 'question' : 'questions' }}
     </p>
+    @if (p.endsAt) {
+      <p class="meta">Scheduled end <time [attr.datetime]="p.endsAt">{{ p.endsAt | date: 'medium' }}</time></p>
+    }
   </div>
   @if (notice()) {
     <div class="notice success" role="status">
@@ -256,8 +259,11 @@
           </p>
           <div class="stack small-gap">
             @if (p.status === 'DRAFT' && !p.blocked) {
+              @if (needsEndTime()) {
+                <p class="hint">Set a future end date in Edit draft before publishing.</p>
+              }
               <a class="button" [routerLink]="['/polls', p.id, 'edit']">Edit draft</a
-              ><button class="button primary" [disabled]="busy()" (click)="ask('publish')">
+              ><button class="button primary" [disabled]="busy() || needsEndTime()" (click)="ask('publish')">
                 Publish poll</button
               ><button class="text-button danger" [disabled]="busy()" (click)="ask('delete')">
                 Delete draft

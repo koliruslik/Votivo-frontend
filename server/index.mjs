@@ -57,6 +57,17 @@ export function createApp(options = {}) {
       redirect: 'manual',
       signal: AbortSignal.timeout(12000),
     });
+  const checkAccount = options.checkAccount ?? (async identity => {
+    if (!internalSecret || !Number.isSafeInteger(identity.issuedAt) || identity.issuedAt <= 0) return 503;
+    try {
+      const response = await upstream(targets.user ?? process.env['USER_URL'] ?? 'http://localhost:18081',
+        `/internal/v1/users/${encodeURIComponent(identity.subject)}/access?issuedAt=${identity.issuedAt}${identity.admin ? '&admin=true' : ''}`);
+      if (response.status === 204) return 204;
+      return [403, 404].includes(response.status) ? 403 : 503;
+    } catch {
+      return 503;
+    }
+  });
   return createServer(async (req, res) => {
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Referrer-Policy', 'no-referrer');
@@ -88,53 +99,98 @@ export function createApp(options = {}) {
       }
       res.setHeader('Cache-Control', 'no-store');
       const path = url.pathname;
-      const userRoute = path === '/api/v1/users/me' || path === '/api/v1/users/me/header';
+      const adminUsersRoute = /^\/api\/v1\/admin\/users(?:\/[0-9a-fA-F-]{36}(?:\/status)?)?$/.test(
+        path,
+      );
+      const photoRoute = path === '/api/v1/users/me/photo';
+      const userRoute =
+        adminUsersRoute ||
+        photoRoute ||
+        path === '/api/v1/users/me' ||
+        path === '/api/v1/users/me/header';
       if (userRoute) {
-        if (!(path.endsWith('/header') ? ['GET'] : ['GET', 'PATCH']).includes(req.method))
+        if (
+          !(
+            adminUsersRoute
+              ? path.endsWith('/status')
+                ? ['PATCH']
+                : ['GET']
+              : photoRoute
+                ? ['GET', 'PUT', 'DELETE']
+                : path.endsWith('/header')
+                  ? ['GET']
+                  : ['GET', 'PATCH', 'DELETE']
+          ).includes(req.method)
+        )
           return send(res, 405, 'Method not allowed');
         if (req.headers.origin && req.headers.origin !== origin)
           return send(res, 403, 'Origin rejected');
         if (!req.headers.authorization) return send(res, 401, 'Sign in required');
         try {
-          await authenticateUser(req.headers.authorization, req.headers.dpop, req.method, url.href);
+          const user = await authenticateUser(
+            req.headers.authorization,
+            req.headers.dpop,
+            req.method,
+            url.href,
+          );
+          if (adminUsersRoute && !user.admin) return send(res, 403, 'Administrator required');
+          if (
+            user.admin &&
+            !adminUsersRoute &&
+            !(path === '/api/v1/users/me/header' && req.method === 'GET')
+          )
+            return send(res, 403, 'Administrators can only manage users and polls');
         } catch {
           return send(res, 401, 'Invalid or expired session');
         }
         const headers = {
-          Accept: 'application/json',
+          Accept: photoRoute
+            ? 'image/jpeg, image/png, application/problem+json'
+            : 'application/json',
           Authorization: req.headers.authorization,
           'X-Forwarded-Proto': new URL(origin).protocol.slice(0, -1),
           'X-Forwarded-Host': new URL(origin).host,
           ...(req.headers.dpop ? { DPoP: req.headers.dpop } : {}),
         };
         let body;
-        if (req.method === 'PATCH') {
-          if (req.headers['content-type']?.split(';')[0] !== 'application/json')
+        if (req.method === 'PATCH' || (photoRoute && req.method === 'PUT')) {
+          const contentType = req.headers['content-type'] ?? '';
+          const limit = photoRoute ? 6 * 1024 * 1024 : 16384;
+          if (
+            photoRoute &&
+            (!/^multipart\/form-data\s*;/i.test(contentType) || !/boundary=/i.test(contentType))
+          )
+            return send(res, 415, 'Multipart photo required');
+          if (!photoRoute && contentType.split(';')[0] !== 'application/json')
             return send(res, 415, 'JSON required');
           const chunks = [];
           let size = 0;
           for await (const chunk of req) {
             size += chunk.length;
-            if (size > 16384) return send(res, 413, 'Body too large');
+            if (size > limit) return send(res, 413, 'Body too large');
             chunks.push(chunk);
           }
           body = Buffer.concat(chunks);
-          headers['Content-Type'] = 'application/json';
+          headers['Content-Type'] = contentType;
         }
         const response = await fetch(
-          new URL(path, targets.user ?? process.env['USER_URL'] ?? 'http://localhost:18081'),
+          new URL(
+            path + url.search,
+            targets.user ?? process.env['USER_URL'] ?? 'http://localhost:18081',
+          ),
           {
             method: req.method,
             headers,
             body,
             redirect: 'manual',
-            signal: AbortSignal.timeout(12000),
+            signal: AbortSignal.timeout(!photoRoute && req.method === 'DELETE' ? 45000 : 12000),
           },
         );
         if (response.status >= 300 && response.status < 400)
           return send(res, 502, 'Unexpected service redirect');
         res.writeHead(response.status, {
           'Content-Type': response.headers.get('Content-Type') ?? 'application/json',
+          ...(response.headers.get('X-Account-Access') === 'denied' ? { 'X-Account-Access': 'denied' } : {}),
         });
         return res.end(Buffer.from(await response.arrayBuffer()));
       }
@@ -176,7 +232,23 @@ export function createApp(options = {}) {
       if ((vote || adminRoute || path.endsWith('/mine') || req.method !== 'GET') && !identity)
         return send(res, 401, 'Sign in required');
       if (adminRoute && !identity?.admin) return send(res, 403, 'Administrator required');
+      if (adminRoute && !(path.endsWith('/block') ? req.method === 'POST' : req.method === 'GET'))
+        return send(res, 405, 'Method not allowed');
+      if (
+        identity?.admin &&
+        !adminRoute &&
+        !(req.method === 'GET' && new RegExp(`^/api/v1/polls/${id}$`).test(path))
+      )
+        return send(res, 403, 'Administrators can only manage users and polls');
       const headers = { Accept: 'application/json' };
+      if (identity) {
+        const access = await checkAccount(identity);
+        if (access !== 204) {
+          if (access === 403) res.setHeader('X-Account-Access', 'denied');
+          return send(res, access === 403 ? 403 : 503,
+            access === 403 ? 'Account access has been revoked' : 'Account access could not be verified');
+        }
+      }
       if (identity) headers['Authorization'] = `Bearer ${identity.token}`;
       if (vote || result) {
         const pollId = (vote || result)[1];
@@ -190,6 +262,8 @@ export function createApp(options = {}) {
         if (!access.ok)
           return send(res, access.status >= 500 ? 503 : access.status, 'Poll not available');
         const metadata = await access.json();
+        if (vote && req.method !== 'GET' && metadata.endsAt && Date.parse(metadata.endsAt) <= Date.now())
+          return send(res, 409, 'Voting has ended');
         if (metadata.blocked && !identity?.admin) return send(res, 404, 'Poll not available');
       }
       if (vote) headers['X-User-ID'] = identity.subject;

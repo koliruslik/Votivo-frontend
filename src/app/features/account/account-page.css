@@ -3,9 +3,16 @@
   max-width: 960px;
   margin: 0 auto;
 }
-.profile-form {
-  padding-bottom: 24px;
+.profile-editor {
+  display: grid;
+  grid-template-columns: 160px minmax(0, 1fr);
+  align-items: start;
+  gap: 32px;
+  padding: 24px 0;
   border-bottom: 1px solid var(--border);
+}
+.profile-form {
+  min-width: 0;
 }
 .name-fields {
   display: grid;
@@ -107,34 +114,6 @@ nav button.selected {
   border-radius: 14px;
   background: var(--surface);
 }
-.profile-preview {
-  display: flex;
-  align-items: center;
-  gap: 18px;
-  padding: 24px 0;
-}
-.profile-avatar {
-  display: grid;
-  place-items: center;
-  flex-shrink: 0;
-  width: 56px;
-  height: 56px;
-  border-radius: 50%;
-  background: var(--accent);
-  color: white;
-  font-weight: 650;
-}
-.field-label {
-  color: var(--muted);
-  font-size: 0.8rem;
-  margin: 0 0 6px;
-}
-.profile-preview h2 {
-  margin: 0;
-  font-size: 1.1rem;
-  font-weight: 600;
-  overflow-wrap: anywhere;
-}
 .setting-row,
 .deletion-section {
   display: flex;
@@ -195,6 +174,12 @@ button:focus-visible {
   outline: 3px solid #6b9888;
   outline-offset: 3px;
 }
+@media (max-width: 760px) {
+  .profile-editor {
+    grid-template-columns: 1fr;
+    gap: 24px;
+  }
+}
 @media (max-width: 520px) {
   .name-fields {
     grid-template-columns: 1fr;
@@ -218,4 +203,14 @@ button:focus-visible {
     flex: 1;
     text-align: center;
   }
+}
+
+.deletion-error {
+  color: var(--danger);
+  font-size: 0.875rem;
+}
+.dialog-actions .danger {
+  background: var(--danger);
+  color: #fff;
+  border-color: var(--danger);
 }
